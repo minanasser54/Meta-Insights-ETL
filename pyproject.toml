@@ -1,0 +1,29 @@
+[project]
+name = "metaetl"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Mina_Nasser", email = "mina.nasser54@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "facebook-business>=26.0.1",
+    "pandas>=3.0.5",
+    "pydantic-settings>=2.10.1",
+    "pyodbc>=5.2.0",
+    "sqlalchemy>=2.0.52",
+]
+
+
+[build-system]
+requires = ["uv_build>=0.12.10,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.3.0",
+]
