@@ -6,7 +6,7 @@ from sqlalchemy import Connection, Engine, delete, desc
 from sqlalchemy.orm import Session
 
 from config import get_conf
-from facts.fact_helpers import daily_window, log_fact_window, page_tokens
+from facts.fact_helpers import daily_window, date_key, log_fact_window, page_tokens
 from models import Post, PostInsightsDaily
 from utils.dbloader import open_session, resolve_token, upsert
 from utils.logging import logger
@@ -15,7 +15,8 @@ from utils.metaclient import MetaClient, get_client
 
 METRICS = "post_activity_by_action_type,post_reactions_by_type_total"
 PARAMS = {"metric": METRICS, "period": "lifetime", "limit": 100}
-KEY_COLUMNS = ["PostID", "Date"]
+KEY_COLUMNS = ["PostID", "DateKey"]
+OUTPUT_COLUMNS = ["PostID", "Date", "DateKey", "Shares", "Reactions", "Comments"]
 
 
 def _number(value: Any) -> float | None:
@@ -109,8 +110,8 @@ def _transform(raw_rows: list[dict]) -> pd.DataFrame:
 
     rows = []
     for (post_id, day), values in totals.items():
-        rows.append({"PostID": post_id, "Date": day, **values})
-    return pd.DataFrame(rows, columns=["PostID", "Date", "Shares", "Reactions", "Comments"]).drop_duplicates(subset=KEY_COLUMNS).reset_index(drop=True)
+        rows.append({"PostID": post_id, "Date": day, "DateKey": date_key(day), **values})
+    return pd.DataFrame(rows, columns=OUTPUT_COLUMNS).drop_duplicates(subset=KEY_COLUMNS).reset_index(drop=True)
 
 
 def fact_post_insights_daily(
