@@ -27,6 +27,13 @@ AD_COLUMNS = [
 CREATIVE_COLUMNS = ["CreativeId", "CreativeName"]
 
 
+def _as_int(value) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _extract(client: MetaClient, token: str, account_ids: list[str], parent_by_adset: dict[str, dict]) -> list[dict]:
     rows: list[dict] = []
     for index, account_id in enumerate(account_ids, start=1):
@@ -75,7 +82,7 @@ def _transform(raw_rows: list[dict], parent_by_adset: dict[str, dict]) -> tuple[
             "Status": ad.get("status"),
             "ConfiguredStatus": ad.get("configured_status"),
             "EffectiveStatus": ad.get("effective_status"),
-            "AdActiveTime": as_datetime(ad.get("ad_active_time")),
+            "AdActiveTime": _as_int(ad.get("ad_active_time")),
             "SourceAdID": ad.get("source_ad_id"),
             "EffectiveObjectStoryID": ad.get("effective_object_story_id"),
             "ObjectStoryID": ad.get("object_story_id"),

@@ -29,12 +29,12 @@ def run_staging(
     logger.info("Starting staging ETL")
     dimensions = (
         ("Business", dimension_business),
-        # ("AdAccount", dimension_adaccount),
-        # ("Campaign", dimension_campaign),
-        # ("AdSet", dimension_adset),
-        # ("Ad and Creative", dimension_ad_and_creative),
-        # ("Page", dimension_page),
-        # ("Post", dimension_post),
+        ("AdAccount", dimension_adaccount),
+        ("Campaign", dimension_campaign),
+        ("AdSet", dimension_adset),
+        ("Ad and Creative", dimension_ad_and_creative),
+        ("Page", dimension_page),
+        ("Post", dimension_post),
     )
     for name, dimension in dimensions:
         try:
@@ -43,8 +43,8 @@ def run_staging(
         except Exception:
             logger.exception("Dimension %s failed; continuing with the next dimension", name)
     facts = (
-        # ("AdInsightsDaily", fact_ad_insights_daily),
-        # ("PageInsightsDaily", fact_page_insights_daily),
+        ("AdInsightsDaily", fact_ad_insights_daily),
+        ("PageInsightsDaily", fact_page_insights_daily),
         ("PostInsightsDaily", fact_post_insights_daily),
     )
     for name, fact in facts:
