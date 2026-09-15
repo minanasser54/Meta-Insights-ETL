@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from models import AdAccount, Campaign
 from utils.dbloader import open_session, read_ids, resolve_token, upsert
-from utils.dimension_helpers import as_datetime, as_json
+from utils.dimension_helpers import as_datetime, as_json, bare_account_id
 from utils.logging import logger
 from utils.metaclient import MetaClient, get_client
 
@@ -35,9 +35,9 @@ def _extract(client: MetaClient, token: str, account_ids: list[str]) -> list[dic
     rows: list[dict] = []
     for index, account_id in enumerate(account_ids, start=1):
         try:
-            for page in client.paginate(f"/act_{account_id.removeprefix('act_')}/campaigns", token, PARAMS):
+            for page in client.paginate(f"/act_{bare_account_id(account_id)}/campaigns", token, PARAMS):
                 for campaign in page:
-                    campaign["_account_id"] = account_id
+                    campaign["_account_id"] = bare_account_id(account_id)
                     rows.append(campaign)
         except Exception:
             logger.exception("Campaign fetch failed for AccountID=%s", account_id)
@@ -53,7 +53,7 @@ def _transform(raw_rows: list[dict]) -> pd.DataFrame:
         promoted = campaign.get("promoted_object") or {}
         rows.append({
             "CampaignID": campaign.get("id"),
-            "AdAccountID": campaign.get("_account_id") or campaign.get("account_id"),
+            "AdAccountID": bare_account_id(campaign.get("_account_id") or campaign.get("account_id")),
             "CampaignName": campaign.get("name"),
             "Objective": campaign.get("objective"),
             "BuyingType": campaign.get("buying_type"),

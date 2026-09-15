@@ -25,6 +25,30 @@ def as_json(value: Any) -> str | None:
     return json.dumps(value, separators=(",", ":"), ensure_ascii=True)
 
 
+def as_int(value: Any) -> int | None:
+    """Coerce a value to a plain int, e.g. for INTEGER/BIGINT columns fed by API fields
+    that may arrive as numeric strings. Returns None on any non-numeric or missing input.
+    """
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def bare_account_id(account_id: Any) -> str | None:
+    """Meta ad account IDs are addressed with an 'act_' prefix (e.g. 'act_123456') but
+    every AdAccountID foreign-key column in the warehouse (AdSet, Ad, AdInsightsDaily)
+    stores the bare numeric ID as BIGINT. Always route account IDs through this helper
+    before writing them to any AdAccountID column so the stored value is consistent and
+    castable to BIGINT downstream, regardless of which form the caller happened to have.
+    """
+    if account_id is None:
+        return None
+    return str(account_id).removeprefix("act_")
+
+
 def fetch_for_parents(client, parent_ids: list[str], endpoint_template: str, token: str, params: dict) -> list[dict]:
     rows: list[dict] = []
     total = len(parent_ids)
