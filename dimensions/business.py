@@ -11,7 +11,7 @@ from utils.metaclient import MetaClient, get_client
 
 
 ENDPOINT = "/me/adaccounts"
-PARAMS = {"fields": "id,name,business{id,name}", "limit": 500}
+PARAMS = {"fields": "id,name,business{id,name}", "limit": 100}
 KEY_COLUMNS = ["BusinessID"]
 OUTPUT_COLUMNS = ["BusinessID", "BusinessName"]
 

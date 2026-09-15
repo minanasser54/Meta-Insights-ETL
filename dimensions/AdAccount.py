@@ -18,7 +18,7 @@ PARAMS = {
         "spend_cap,min_campaign_group_spend_cap,min_daily_budget,"
         "funding_source_details,is_personal,business{id,name}"
     ),
-    "limit": 500,
+    "limit": 100,
 }
 KEY_COLUMNS = ["AccountID"]
 OUTPUT_COLUMNS = [

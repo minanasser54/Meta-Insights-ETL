@@ -14,7 +14,7 @@ class Base(DeclarativeBase):
 class Ad(Base):
     __tablename__ = "Ad"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    AdID: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    AdID: Mapped[int] = mapped_column(BigInteger, primary_key=True,autoincrement=False)
     AdAccountID: Mapped[int] = mapped_column(BigInteger, nullable=False)
     CampaignID: Mapped[int | None] = mapped_column(BigInteger)
     AdSetID: Mapped[int | None] = mapped_column(BigInteger)
@@ -37,7 +37,7 @@ class Ad(Base):
 class AdAccount(Base):
     __tablename__ = "AdAccount"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    AccountID: Mapped[str] = mapped_column(String(500), primary_key=True)
+    AccountID: Mapped[str] = mapped_column(String(500), primary_key=True, autoincrement=False)
     AccountName: Mapped[str | None] = mapped_column(String(500))
     AccountStatus: Mapped[int | None] = mapped_column(Integer)
     DisableReason: Mapped[int | None] = mapped_column(Integer)
@@ -60,8 +60,8 @@ class AdAccount(Base):
 class AdInsightsDaily(Base):
     __tablename__ = "AdInsightsDaily"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    AdID: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    DateKey: Mapped[int] = mapped_column(Integer, primary_key=True)
+    AdID: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    DateKey: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
     AdSetID: Mapped[int | None] = mapped_column(BigInteger)
     CampaignID: Mapped[int | None] = mapped_column(BigInteger)
     AdAccountID: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -88,7 +88,7 @@ class AdInsightsDaily(Base):
 class AdSet(Base):
     __tablename__ = "AdSet"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    AdSetID: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    AdSetID: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
     AdAccountID: Mapped[int] = mapped_column(BigInteger, nullable=False)
     CampaignID: Mapped[int | None] = mapped_column(BigInteger)
     AdSetName: Mapped[str | None] = mapped_column(String(500))
@@ -129,7 +129,7 @@ class AdSet(Base):
 class Business(Base):
     __tablename__ = "Business"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    BusinessID: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    BusinessID: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
     BusinessName: Mapped[str | None] = mapped_column(String(500))
     LoadDate: Mapped[datetime | None] = mapped_column(DateTime)
 
@@ -137,7 +137,7 @@ class Business(Base):
 class Campaign(Base):
     __tablename__ = "Campaign"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    CampaignID: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    CampaignID: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
     AdAccountID: Mapped[str] = mapped_column(String(500), nullable=False)
     CampaignName: Mapped[str | None] = mapped_column(String(500))
     Objective: Mapped[str | None] = mapped_column(String(100))
@@ -170,7 +170,7 @@ class Campaign(Base):
 class Creative(Base):
     __tablename__ = "Creative"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    CreativeId: Mapped[str] = mapped_column(String(100), primary_key=True)
+    CreativeId: Mapped[str] = mapped_column(String(100), primary_key=True, autoincrement=False)
     CreativeName: Mapped[str | None] = mapped_column(String(255))
     LoadDate: Mapped[datetime | None] = mapped_column(DateTime)
 
@@ -178,7 +178,7 @@ class Creative(Base):
 class Page(Base):
     __tablename__ = "Page"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    PageID: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    PageID: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
     PageName: Mapped[str | None] = mapped_column(String(500))
     BusinessID: Mapped[int | None] = mapped_column(BigInteger)
     VerificationStatus: Mapped[str | None] = mapped_column(String(100))
@@ -190,9 +190,9 @@ class Page(Base):
 class PageInsightsDaily(Base):
     __tablename__ = "PageInsightsDaily"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    PageID: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    DateKey: Mapped[int] = mapped_column(Integer, primary_key=True)
-    MetricName: Mapped[str] = mapped_column(String(200), primary_key=True)
+    PageID: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    DateKey: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    MetricName: Mapped[str] = mapped_column(String(200), primary_key=True, autoincrement=False)
     Date: Mapped[datetime] = mapped_column(Date, nullable=False)
     Value: Mapped[float | None] = mapped_column(Numeric(18, 6))
     LoadDate: Mapped[datetime | None] = mapped_column(DateTime)
@@ -201,7 +201,7 @@ class PageInsightsDaily(Base):
 class Post(Base):
     __tablename__ = "Post"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    PostID: Mapped[str] = mapped_column(String(100), primary_key=True)
+    PostID: Mapped[str] = mapped_column(String(100), primary_key=True, autoincrement=False)
     PageID: Mapped[int] = mapped_column(BigInteger, nullable=False)
     CreatedTime: Mapped[datetime | None] = mapped_column(DateTime)
     UpdatedTime: Mapped[datetime | None] = mapped_column(DateTime)
@@ -216,10 +216,10 @@ class Post(Base):
 class PostInsightsDaily(Base):
     __tablename__ = "PostInsightsDaily"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    PostID: Mapped[str] = mapped_column(String(100), primary_key=True)
-    DateKey: Mapped[int] = mapped_column(Integer, primary_key=True)
+    PostID: Mapped[str] = mapped_column(String(100), primary_key=True, autoincrement=False)
+    DateKey: Mapped[int] = mapped_column(Integer)
     Date: Mapped[datetime] = mapped_column(Date, nullable=False)
     Shares: Mapped[int | None] = mapped_column(BigInteger)
     Reactions: Mapped[int | None] = mapped_column(BigInteger)
     Comments: Mapped[int | None] = mapped_column(BigInteger)
-    LoadDate: Mapped[datetime | None] = mapped_column(DateTime)
+    LoadDate: Mapped[datetime | None] = mapped_column(DateTime, primary_key=True, autoincrement=False)

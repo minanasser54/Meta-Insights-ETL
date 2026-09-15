@@ -56,6 +56,7 @@ def _extract(client: MetaClient, token: str, account_ids: list[str], since: str,
         try:
             for page in client.paginate(f"/act_{bare_account_id(account_id)}/insights", token, params):
                 rows.extend(page)
+            logger.info("AdInsightsDaily fetch done for AccountID=%s", account_id)
         except Exception:
             logger.exception("AdInsightsDaily fetch failed for AccountID=%s", account_id)
             continue

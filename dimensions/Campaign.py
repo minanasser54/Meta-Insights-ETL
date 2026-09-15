@@ -39,6 +39,7 @@ def _extract(client: MetaClient, token: str, account_ids: list[str]) -> list[dic
                 for campaign in page:
                     campaign["_account_id"] = bare_account_id(account_id)
                     rows.append(campaign)
+            logger.info("Campaign fetch done for AccountID=%s", account_id)
         except Exception:
             logger.exception("Campaign fetch failed for AccountID=%s", account_id)
             continue

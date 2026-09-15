@@ -44,6 +44,7 @@ def _extract(client: MetaClient, token: str, account_ids: list[str], parent_by_a
                     ad["_campaign_id"] = parent["CampaignID"]
                     ad["_account_id"] = bare_account_id(parent["AdAccountID"] or account_id)
                     rows.append(ad)
+            logger.info("Ad fetch done for AccountID=%s", account_id)
         except Exception:
             logger.exception("Ad fetch failed for AccountID=%s", account_id)
             continue

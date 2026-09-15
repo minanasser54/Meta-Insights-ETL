@@ -9,16 +9,33 @@ from models import Base
 from utils.logging import logger
 
 
+# def get_engine(settings: Settings | None = None) -> Engine:
+#     settings = settings or get_conf()
+#     engine_kwargs = {"future": True}
+#     if settings.database_backend.lower() == "sqlserver":
+#         engine_kwargs["fast_executemany"] = True
+#     engine = create_engine(settings.sqlalchemy_url(), **engine_kwargs)
+#     if settings.database_backend.lower() == "sqlite":
+#         return engine.execution_options(schema_translate_map={"STG.Marketing": None})
+#     return engine
+
 def get_engine(settings: Settings | None = None) -> Engine:
     settings = settings or get_conf()
     engine_kwargs = {"future": True}
+    
     if settings.database_backend.lower() == "sqlserver":
         engine_kwargs["fast_executemany"] = True
+        # Map the schema string directly to escaped brackets for MSSQL
+        engine = create_engine(settings.sqlalchemy_url(), **engine_kwargs)
+        return engine.execution_options(
+            schema_translate_map={settings.sql_schema: f"[{settings.sql_schema}]"}
+        )
+        
     engine = create_engine(settings.sqlalchemy_url(), **engine_kwargs)
     if settings.database_backend.lower() == "sqlite":
-        return engine.execution_options(schema_translate_map={"STG.Marketing": None})
+        return engine.execution_options(schema_translate_map={settings.sql_schema: None})
+        
     return engine
-
 
 def create_schema(engine: Engine) -> None:
     Base.metadata.create_all(engine)
@@ -105,3 +122,62 @@ def upsert(
     finally:
         if owns_session:
             session.close()
+
+
+
+# def upsert(
+#     df: pd.DataFrame,
+#     model: type[Base],
+#     key_columns: list[str],
+#     session: Session | None = None,
+#     engine: Engine | None = None,
+#     commit: bool = True,
+# ) -> int:
+#     if df.empty:
+#         logger.info("No rows to load into %s", model.__tablename__)
+#         return 0
+#     if session is None:
+#         if engine is None:
+#             engine = get_engine()
+#         session = get_session_factory(engine)()
+#         owns_session = True
+#     else:
+#         owns_session = False
+
+#     try:
+#         records = []
+#         for raw_record in df.to_dict(orient="records"):
+#             record = {}
+#             for column, value in raw_record.items():
+#                 if value is None or value is pd.NaT:
+#                     record[column] = None
+#                 elif pd.api.types.is_scalar(value) and pd.isna(value):
+#                     record[column] = None
+#                 else:
+#                     record[column] = value
+#             records.append(record)
+
+#         for record in records:
+#             record.setdefault("LoadDate", datetime.now())
+#             filters = [getattr(model, key) == record[key] for key in key_columns]
+#             existing = session.execute(select(model).where(*filters)).scalar_one_or_none()
+#             if existing is None:
+#                 session.add(model(**record))
+#             else:
+#                 for column, value in record.items():
+#                     # Skip updating primary/key columns to avoid identity update errors
+#                     if column in key_columns:
+#                         continue
+#                     setattr(existing, column, value)
+
+#         if commit:
+#             session.commit()
+#         logger.info("Upserted %d rows into %s", len(records), model.__tablename__)
+#         return len(records)
+#     except Exception:
+#         session.rollback()
+#         logger.exception("Failed loading %s", model.__tablename__)
+#         raise
+#     finally:
+#         if owns_session:
+#             session.close()

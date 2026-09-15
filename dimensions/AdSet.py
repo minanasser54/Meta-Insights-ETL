@@ -39,6 +39,7 @@ def _extract(client: MetaClient, token: str, account_ids: list[str]) -> list[dic
                 for adset in page:
                     adset["_account_id"] = bare_account_id(account_id)
                     rows.append(adset)
+            logger.info("AdSet fetch done for AccountID=%s", account_id)
         except Exception:
             logger.exception("AdSet fetch failed for AccountID=%s", account_id)
             continue

@@ -42,6 +42,7 @@ def _extract(client: MetaClient, user_token: str, page_ids: list[str]) -> list[d
                 for post in page:
                     post["_page_id"] = page_id
                     rows.append(post)
+            logger.info("Post fetch done for PageID=%s", page_id)
         except Exception:
             logger.exception("Post fetch failed for PageID=%s", page_id)
             continue
