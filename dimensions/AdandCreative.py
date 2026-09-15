@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from models import Ad, AdAccount, AdSet, Creative
 from utils.dbloader import open_session, resolve_token, upsert
-from utils.dimension_helpers import as_datetime, as_json
+from utils.dimension_helpers import as_datetime, as_int, as_json, bare_account_id
 from utils.logging import logger
 from utils.metaclient import MetaClient, get_client
 
@@ -27,34 +27,22 @@ AD_COLUMNS = [
 CREATIVE_COLUMNS = ["CreativeId", "CreativeName"]
 
 
-def _as_int(value) -> int | None:
-    try:
-        return int(value) if value is not None else None
-    except (TypeError, ValueError):
-        return None
-
-
 def _extract(client: MetaClient, token: str, account_ids: list[str], parent_by_adset: dict[str, dict]) -> list[dict]:
     rows: list[dict] = []
     for index, account_id in enumerate(account_ids, start=1):
         try:
-            for page in client.paginate(f"/act_{account_id.removeprefix('act_')}/ads", token, PARAMS):
+            for page in client.paginate(f"/act_{bare_account_id(account_id)}/ads", token, PARAMS):
                 for ad in page:
                     adset_id = str(ad.get("adset_id")) if ad.get("adset_id") else None
                     parent = parent_by_adset.get(adset_id)
                     if not parent:
-                        # logger.warning(
-                        #     "AdID=%s has AdSetID=%s missing from AdSet staging; using API parent IDs",
-                        #     ad.get("id"),
-                        #     adset_id,
-                        # )
                         parent = {
                             "CampaignID": ad.get("campaign_id"),
-                            "AdAccountID": ad.get("account_id") or account_id,
+                            "AdAccountID": bare_account_id(ad.get("account_id") or account_id),
                         }
                     ad["_adset_id"] = adset_id
                     ad["_campaign_id"] = parent["CampaignID"]
-                    ad["_account_id"] = parent["AdAccountID"] or account_id
+                    ad["_account_id"] = bare_account_id(parent["AdAccountID"] or account_id)
                     rows.append(ad)
         except Exception:
             logger.exception("Ad fetch failed for AccountID=%s", account_id)
@@ -74,7 +62,7 @@ def _transform(raw_rows: list[dict], parent_by_adset: dict[str, dict]) -> tuple[
             creative_rows.append({"CreativeId": creative_id, "CreativeName": creative.get("name")})
         ad_rows.append({
             "AdID": ad.get("id"),
-            "AdAccountID": ad.get("_account_id"),
+            "AdAccountID": bare_account_id(ad.get("_account_id")),
             "CampaignID": ad.get("_campaign_id"),
             "AdSetID": ad.get("_adset_id"),
             "CreativeID": creative_id,
@@ -82,7 +70,7 @@ def _transform(raw_rows: list[dict], parent_by_adset: dict[str, dict]) -> tuple[
             "Status": ad.get("status"),
             "ConfiguredStatus": ad.get("configured_status"),
             "EffectiveStatus": ad.get("effective_status"),
-            "AdActiveTime": _as_int(ad.get("ad_active_time")),
+            "AdActiveTime": as_int(ad.get("ad_active_time")),
             "SourceAdID": ad.get("source_ad_id"),
             "EffectiveObjectStoryID": ad.get("effective_object_story_id"),
             "ObjectStoryID": ad.get("object_story_id"),
@@ -110,7 +98,7 @@ def dimension_ad_and_creative(
         parent_by_adset = {
             str(row["AdSetID"]): {
                 "CampaignID": str(row["CampaignID"]) if row["CampaignID"] else None,
-                "AdAccountID": str(row["AdAccountID"]) if row["AdAccountID"] else None,
+                "AdAccountID": bare_account_id(row["AdAccountID"]) if row["AdAccountID"] else None,
             }
             for row in adset_rows
         }

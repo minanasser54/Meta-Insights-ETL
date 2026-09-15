@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from models import AdAccount, AdSet, Campaign
 from utils.dbloader import open_session, resolve_token, upsert
-from utils.dimension_helpers import as_datetime, as_json
+from utils.dimension_helpers import as_datetime, as_json, bare_account_id
 from utils.logging import logger
 from utils.metaclient import MetaClient, get_client
 
@@ -35,9 +35,9 @@ def _extract(client: MetaClient, token: str, account_ids: list[str]) -> list[dic
     rows: list[dict] = []
     for index, account_id in enumerate(account_ids, start=1):
         try:
-            for page in client.paginate(f"/act_{account_id.removeprefix('act_')}/adsets", token, PARAMS):
+            for page in client.paginate(f"/act_{bare_account_id(account_id)}/adsets", token, PARAMS):
                 for adset in page:
-                    adset["_account_id"] = account_id
+                    adset["_account_id"] = bare_account_id(account_id)
                     rows.append(adset)
         except Exception:
             logger.exception("AdSet fetch failed for AccountID=%s", account_id)
@@ -59,7 +59,7 @@ def _transform(raw_rows: list[dict], campaign_ids: set[str]) -> pd.DataFrame:
             continue
         rows.append({
             "AdSetID": adset.get("id"),
-            "AdAccountID": adset.get("_account_id"),
+            "AdAccountID": bare_account_id(adset.get("_account_id") or adset.get("account_id")),
             "CampaignID": campaign_id,
             "AdSetName": adset.get("name"),
             "Status": adset.get("status"),

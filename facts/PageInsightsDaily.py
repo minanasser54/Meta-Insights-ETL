@@ -14,7 +14,7 @@ from utils.metaclient import MetaClient, get_client
 
 PAGE_INSIGHT_METRICS = ["page_views_total", "page_post_engagements", "page_video_views"]
 PARAMS = {"period": "day", "metric": ",".join(PAGE_INSIGHT_METRICS), "limit": 100}
-KEY_COLUMNS = ["PageID", "Date", "MetricName"]
+KEY_COLUMNS = ["PageID", "DateKey", "MetricName"]
 OUTPUT_COLUMNS = ["PageID", "Date", "DateKey", "MetricName", "Value"]
 
 

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from facts.fact_helpers import as_date, date_key, daily_window, log_fact_window
 from models import AdAccount, AdInsightsDaily
 from utils.dbloader import open_session, resolve_token, upsert
+from utils.dimension_helpers import bare_account_id
 from utils.logging import logger
 from utils.metaclient import MetaClient, get_client
 
@@ -19,7 +20,7 @@ FIELDS = (
     "inline_post_engagement,cost_per_inline_post_engagement,actions,cost_per_action_type"
 )
 PARAMS = {"level": "ad", "time_increment": 1, "fields": FIELDS, "limit": 100}
-KEY_COLUMNS = ["AdID", "Date"]
+KEY_COLUMNS = ["AdID", "DateKey"]
 LEAD_ACTION_TYPES = {"lead", "onsite_conversion.lead", "leadgen_grouped"}
 OUTPUT_COLUMNS = [
     "AdID", "AdSetID", "CampaignID", "AdAccountID", "Date", "DateKey", "Impressions", "Reach",
@@ -53,7 +54,7 @@ def _extract(client: MetaClient, token: str, account_ids: list[str], since: str,
     params = {**PARAMS, "time_range": json.dumps({"since": since, "until": until})}
     for index, account_id in enumerate(account_ids, start=1):
         try:
-            for page in client.paginate(f"/act_{account_id.removeprefix('act_')}/insights", token, params):
+            for page in client.paginate(f"/act_{bare_account_id(account_id)}/insights", token, params):
                 rows.extend(page)
         except Exception:
             logger.exception("AdInsightsDaily fetch failed for AccountID=%s", account_id)
@@ -69,7 +70,7 @@ def _transform(raw_rows: list[dict]) -> pd.DataFrame:
         day = as_date(item.get("date_start"))
         rows.append({
             "AdID": item.get("ad_id"), "AdSetID": item.get("adset_id"), "CampaignID": item.get("campaign_id"),
-            "AdAccountID": item.get("account_id"), "Date": day, "DateKey": date_key(day),
+            "AdAccountID": bare_account_id(item.get("account_id")), "Date": day, "DateKey": date_key(day),
             "Impressions": _number(item.get("impressions")), "Reach": _number(item.get("reach")),
             "Frequency": _number(item.get("frequency")), "Spend": _number(item.get("spend")),
             "SocialSpend": _number(item.get("social_spend")), "Clicks": _number(item.get("clicks")),
