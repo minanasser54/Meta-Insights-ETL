@@ -78,21 +78,3 @@ from main import run_staging
 # Daily run — dimensions, then facts for "yesterday"
 run_staging()
 ```
-
-```python
-from main import run_month_backfill
-
-# Historical backfill for AdInsightsDaily + PageInsightsDaily only
-# (chunked into 10-day windows, run concurrently, up to 10 workers)
-run_month_backfill(since="2026-08-01", until="2026-09-01", chunk_days=10)
-```
-
-```python
-from main import run_post_insights_backfill
-
-# One-time backfill for PostInsightsDaily across ALL posts (threaded).
-# Run this once to seed history; daily run_staging() adds one row per post per day after that.
-run_post_insights_backfill(max_workers=50)
-```
-
-> **Never run `run_post_insights_backfill` from the daily scheduled job** — it's a one-time seed, not a recurring task.
