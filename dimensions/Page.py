@@ -24,6 +24,7 @@ def _extract(client: MetaClient, token: str, business_ids: list[str]) -> list[di
                 for item in page:
                     item["_business_id"] = business_id
                     rows.append(item)
+            logger.info("Page fetch done for BusinessID=%s", business_id)    
         except Exception:
             logger.exception("Page fetch failed for BusinessID=%s", business_id)
             continue

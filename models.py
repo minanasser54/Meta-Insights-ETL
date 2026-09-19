@@ -1,6 +1,7 @@
 from datetime import datetime
+from sqlalchemy.dialects.mssql import NVARCHAR
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, Integer, Numeric, String, Text
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Integer, Numeric, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -14,19 +15,19 @@ class Base(DeclarativeBase):
 class Ad(Base):
     __tablename__ = "Ad"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    AdID: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    AdID: Mapped[int] = mapped_column(BigInteger, primary_key=True,autoincrement=False)
     AdAccountID: Mapped[int] = mapped_column(BigInteger, nullable=False)
     CampaignID: Mapped[int | None] = mapped_column(BigInteger)
     AdSetID: Mapped[int | None] = mapped_column(BigInteger)
     CreativeID: Mapped[int | None] = mapped_column(BigInteger)
-    AdName: Mapped[str | None] = mapped_column(String(500))
-    Status: Mapped[str | None] = mapped_column(String(100))
-    ConfiguredStatus: Mapped[str | None] = mapped_column(String(100))
-    EffectiveStatus: Mapped[str | None] = mapped_column(String(100))
+    AdName: Mapped[str | None] = mapped_column(NVARCHAR(500))
+    Status: Mapped[str | None] = mapped_column(NVARCHAR(100))
+    ConfiguredStatus: Mapped[str | None] = mapped_column(NVARCHAR(100))
+    EffectiveStatus: Mapped[str | None] = mapped_column(NVARCHAR(100))
     AdActiveTime: Mapped[int | None] = mapped_column(Integer)
     SourceAdID: Mapped[int | None] = mapped_column(BigInteger)
-    EffectiveObjectStoryID: Mapped[str | None] = mapped_column(String(500))
-    ObjectStoryID: Mapped[str | None] = mapped_column(String(500))
+    EffectiveObjectStoryID: Mapped[str | None] = mapped_column(NVARCHAR(500))
+    ObjectStoryID: Mapped[str | None] = mapped_column(NVARCHAR(500))
     ScheduledStartTime: Mapped[datetime | None] = mapped_column(DateTime)
     ScheduledEndTime: Mapped[datetime | None] = mapped_column(DateTime)
     CreatedTime: Mapped[datetime | None] = mapped_column(DateTime)
@@ -37,12 +38,12 @@ class Ad(Base):
 class AdAccount(Base):
     __tablename__ = "AdAccount"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    AccountID: Mapped[str] = mapped_column(String(500), primary_key=True)
-    AccountName: Mapped[str | None] = mapped_column(String(500))
+    AccountID: Mapped[str] = mapped_column(NVARCHAR(500), primary_key=True, autoincrement=False)
+    AccountName: Mapped[str | None] = mapped_column(NVARCHAR(500))
     AccountStatus: Mapped[int | None] = mapped_column(Integer)
     DisableReason: Mapped[int | None] = mapped_column(Integer)
-    Currency: Mapped[str | None] = mapped_column(String(50))
-    TimezoneName: Mapped[str | None] = mapped_column(String(200))
+    Currency: Mapped[str | None] = mapped_column(NVARCHAR(50))
+    TimezoneName: Mapped[str | None] = mapped_column(NVARCHAR(200))
     TimezoneOffsetHrsUtc: Mapped[float | None] = mapped_column(Numeric(5, 2))
     AmountSpent: Mapped[float | None] = mapped_column(Numeric(18, 2))
     Balance: Mapped[float | None] = mapped_column(Numeric(18, 2))
@@ -52,7 +53,7 @@ class AdAccount(Base):
     IsPersonal: Mapped[bool | None] = mapped_column(Boolean)
     BusinessID: Mapped[int | None] = mapped_column(BigInteger)
     FundingSourceID: Mapped[int | None] = mapped_column(BigInteger)
-    FundingSourceDisplayString: Mapped[str | None] = mapped_column(String(500))
+    FundingSourceDisplayString: Mapped[str | None] = mapped_column(NVARCHAR(500))
     FundingSourceType: Mapped[int | None] = mapped_column(Integer)
     LoadDate: Mapped[datetime | None] = mapped_column(DateTime)
 
@@ -60,8 +61,8 @@ class AdAccount(Base):
 class AdInsightsDaily(Base):
     __tablename__ = "AdInsightsDaily"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    AdID: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    DateKey: Mapped[int] = mapped_column(Integer, primary_key=True)
+    AdID: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    DateKey: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
     AdSetID: Mapped[int | None] = mapped_column(BigInteger)
     CampaignID: Mapped[int | None] = mapped_column(BigInteger)
     AdAccountID: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -88,22 +89,22 @@ class AdInsightsDaily(Base):
 class AdSet(Base):
     __tablename__ = "AdSet"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    AdSetID: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    AdSetID: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
     AdAccountID: Mapped[int] = mapped_column(BigInteger, nullable=False)
     CampaignID: Mapped[int | None] = mapped_column(BigInteger)
-    AdSetName: Mapped[str | None] = mapped_column(String(500))
-    Status: Mapped[str | None] = mapped_column(String(100))
-    ConfiguredStatus: Mapped[str | None] = mapped_column(String(100))
-    EffectiveStatus: Mapped[str | None] = mapped_column(String(100))
-    OptimizationGoal: Mapped[str | None] = mapped_column(String(100))
+    AdSetName: Mapped[str | None] = mapped_column(NVARCHAR(500))
+    Status: Mapped[str | None] = mapped_column(NVARCHAR(100))
+    ConfiguredStatus: Mapped[str | None] = mapped_column(NVARCHAR(100))
+    EffectiveStatus: Mapped[str | None] = mapped_column(NVARCHAR(100))
+    OptimizationGoal: Mapped[str | None] = mapped_column(NVARCHAR(100))
     DailyBudget: Mapped[float | None] = mapped_column(Numeric(18, 2))
     LifetimeBudget: Mapped[float | None] = mapped_column(Numeric(18, 2))
     BudgetRemaining: Mapped[float | None] = mapped_column(Numeric(18, 2))
     SpendCap: Mapped[float | None] = mapped_column(Numeric(18, 2))
-    SpecialAdCategoryCountry: Mapped[str | None] = mapped_column(String(100))
+    SpecialAdCategoryCountry: Mapped[str | None] = mapped_column(NVARCHAR(100))
     IsBudgetScheduleEnabled: Mapped[bool | None] = mapped_column(Boolean)
     IsAdSetBudgetSharingEnabled: Mapped[bool | None] = mapped_column(Boolean)
-    DestinationType: Mapped[str | None] = mapped_column(String(100))
+    DestinationType: Mapped[str | None] = mapped_column(NVARCHAR(100))
     IsDynamicCreative: Mapped[bool | None] = mapped_column(Boolean)
     PacingType: Mapped[str | None] = mapped_column(Text)
     AttributionSpec: Mapped[str | None] = mapped_column(Text)
@@ -129,31 +130,31 @@ class AdSet(Base):
 class Business(Base):
     __tablename__ = "Business"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    BusinessID: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    BusinessName: Mapped[str | None] = mapped_column(String(500))
+    BusinessID: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    BusinessName: Mapped[str | None] = mapped_column(NVARCHAR(500))
     LoadDate: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class Campaign(Base):
     __tablename__ = "Campaign"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    CampaignID: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    AdAccountID: Mapped[str] = mapped_column(String(500), nullable=False)
-    CampaignName: Mapped[str | None] = mapped_column(String(500))
-    Objective: Mapped[str | None] = mapped_column(String(100))
-    BuyingType: Mapped[str | None] = mapped_column(String(100))
-    Status: Mapped[str | None] = mapped_column(String(100))
-    ConfiguredStatus: Mapped[str | None] = mapped_column(String(100))
-    EffectiveStatus: Mapped[str | None] = mapped_column(String(100))
+    CampaignID: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    AdAccountID: Mapped[str] = mapped_column(NVARCHAR(500), nullable=False)
+    CampaignName: Mapped[str | None] = mapped_column(NVARCHAR(500))
+    Objective: Mapped[str | None] = mapped_column(NVARCHAR(100))
+    BuyingType: Mapped[str | None] = mapped_column(NVARCHAR(100))
+    Status: Mapped[str | None] = mapped_column(NVARCHAR(100))
+    ConfiguredStatus: Mapped[str | None] = mapped_column(NVARCHAR(100))
+    EffectiveStatus: Mapped[str | None] = mapped_column(NVARCHAR(100))
     DailyBudget: Mapped[float | None] = mapped_column(Numeric(18, 2))
     LifetimeBudget: Mapped[float | None] = mapped_column(Numeric(18, 2))
     BudgetRemaining: Mapped[float | None] = mapped_column(Numeric(18, 2))
     SpendCap: Mapped[float | None] = mapped_column(Numeric(18, 2))
     SpecialAdCategories: Mapped[str | None] = mapped_column(Text)
-    SpecialAdCategoryCountry: Mapped[str | None] = mapped_column(String(100))
+    SpecialAdCategoryCountry: Mapped[str | None] = mapped_column(NVARCHAR(100))
     IsBudgetScheduleEnabled: Mapped[bool | None] = mapped_column(Boolean)
     IsAdSetBudgetSharingEnabled: Mapped[bool | None] = mapped_column(Boolean)
-    DestinationType: Mapped[str | None] = mapped_column(String(100))
+    DestinationType: Mapped[str | None] = mapped_column(NVARCHAR(100))
     IsDynamicCreative: Mapped[bool | None] = mapped_column(Boolean)
     PacingType: Mapped[str | None] = mapped_column(Text)
     AttributionSpec: Mapped[str | None] = mapped_column(Text)
@@ -170,18 +171,18 @@ class Campaign(Base):
 class Creative(Base):
     __tablename__ = "Creative"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    CreativeId: Mapped[str] = mapped_column(String(100), primary_key=True)
-    CreativeName: Mapped[str | None] = mapped_column(String(255))
+    CreativeId: Mapped[str] = mapped_column(NVARCHAR(100), primary_key=True, autoincrement=False)
+    CreativeName: Mapped[str | None] = mapped_column(NVARCHAR(255))
     LoadDate: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class Page(Base):
     __tablename__ = "Page"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    PageID: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    PageName: Mapped[str | None] = mapped_column(String(500))
+    PageID: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    PageName: Mapped[str | None] = mapped_column(NVARCHAR(500))
     BusinessID: Mapped[int | None] = mapped_column(BigInteger)
-    VerificationStatus: Mapped[str | None] = mapped_column(String(100))
+    VerificationStatus: Mapped[str | None] = mapped_column(NVARCHAR(100))
     IsVerified: Mapped[bool | None] = mapped_column(Boolean)
     IsPublished: Mapped[bool | None] = mapped_column(Boolean)
     LoadDate: Mapped[datetime | None] = mapped_column(DateTime)
@@ -190,9 +191,9 @@ class Page(Base):
 class PageInsightsDaily(Base):
     __tablename__ = "PageInsightsDaily"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    PageID: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    DateKey: Mapped[int] = mapped_column(Integer, primary_key=True)
-    MetricName: Mapped[str] = mapped_column(String(200), primary_key=True)
+    PageID: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    DateKey: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    MetricName: Mapped[str] = mapped_column(NVARCHAR(200), primary_key=True, autoincrement=False)
     Date: Mapped[datetime] = mapped_column(Date, nullable=False)
     Value: Mapped[float | None] = mapped_column(Numeric(18, 6))
     LoadDate: Mapped[datetime | None] = mapped_column(DateTime)
@@ -201,12 +202,12 @@ class PageInsightsDaily(Base):
 class Post(Base):
     __tablename__ = "Post"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    PostID: Mapped[str] = mapped_column(String(100), primary_key=True)
+    PostID: Mapped[str] = mapped_column(NVARCHAR(100), primary_key=True, autoincrement=False)
     PageID: Mapped[int] = mapped_column(BigInteger, nullable=False)
     CreatedTime: Mapped[datetime | None] = mapped_column(DateTime)
     UpdatedTime: Mapped[datetime | None] = mapped_column(DateTime)
-    PermalinkURL: Mapped[str | None] = mapped_column(String(1000))
-    StatusType: Mapped[str | None] = mapped_column(String(100))
+    PermalinkURL: Mapped[str | None] = mapped_column(NVARCHAR(1000))
+    StatusType: Mapped[str | None] = mapped_column(NVARCHAR(100))
     IsPublished: Mapped[bool | None] = mapped_column(Boolean)
     IsExpired: Mapped[bool | None] = mapped_column(Boolean)
     IsHidden: Mapped[bool | None] = mapped_column(Boolean)
@@ -216,10 +217,11 @@ class Post(Base):
 class PostInsightsDaily(Base):
     __tablename__ = "PostInsightsDaily"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    PostID: Mapped[str] = mapped_column(String(100), primary_key=True)
-    DateKey: Mapped[int] = mapped_column(Integer, primary_key=True)
+    PostID: Mapped[str] = mapped_column(NVARCHAR(100), primary_key=True, autoincrement=False)
+    DateKey: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
     Date: Mapped[datetime] = mapped_column(Date, nullable=False)
     Shares: Mapped[int | None] = mapped_column(BigInteger)
     Reactions: Mapped[int | None] = mapped_column(BigInteger)
     Comments: Mapped[int | None] = mapped_column(BigInteger)
+    #LoadDate: Mapped[datetime | None] = mapped_column(DateTime, primary_key=True, autoincrement=False)
     LoadDate: Mapped[datetime | None] = mapped_column(DateTime)

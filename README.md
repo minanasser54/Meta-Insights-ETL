@@ -1,99 +1,98 @@
-# MetaETL
+# Meta Marketing ETL
 
-MetaETL extracts Meta Marketing API dimensions and daily facts into staging tables. Production transfer is outside this project.
+A staging-layer ETL pipeline that pulls Facebook/Meta Marketing API data (Business, Ad Account, Campaign, AdSet, Ad, Creative, Page, Post) and their daily insight metrics into a SQL Server staging schema (`STG.Marketing`), using SQLAlchemy for the DB layer and pandas for transformation.
 
-## Daily Run
+## What It Does
 
-The Windows scheduled entry point is `run_metaetl.cmd`. It changes to the project directory, runs `uv run main.py`, writes scheduler output to `logs/scheduler.log`, and returns the ETL exit code.
+Each run has two phases:
 
-The default fact window is yesterday through today. For a run on 2026-09-09:
+1. **Dimensions** — slow-changing entity data (Business → AdAccount → Campaign → AdSet → Ad/Creative → Page → Post). Loaded in that order because each step reads IDs written by the previous one.
+2. **Facts** — daily metrics tied to a date (AdInsightsDaily, PageInsightsDaily, PostInsightsDaily).
 
-```text
-since=2026-09-08
-until=2026-09-09
+All loads are **upserts** (insert new rows, update existing ones) keyed by natural IDs, except `PostInsightsDaily`, which is **insert-only** by design (see below).
+
+## Project Structure
+
+```
+main.py                  # Entry points: run_staging(), run_month_backfill(), run_post_insights_backfill()
+models.py                # SQLAlchemy ORM models (one class per staging table)
+STG_DimTables.sql        # DDL reference for dimension tables
+Stg_FactTables.sql       # DDL reference for fact tables
+
+dimensions/
+  business.py            # Business
+  AdAccount.py           # AdAccount
+  Campaign.py             # Campaign
+  AdSet.py                # AdSet
+  AdandCreative.py        # Ad + Creative (loaded together)
+  Page.py                 # Page
+  Post.py                 # Post
+
+facts/
+  AdInsightsDaily.py      # Ad-level daily performance metrics
+  PageInsightsDaily.py    # Page-level daily metrics
+  PostInsightsDaily.py    # Post-level lifetime metrics, snapshotted daily
+  fact_helpers.py         # Shared date/window/token helpers for fact modules
+
+utils/
+  dbloader.py             # Engine creation, session handling, generic upsert()
+  dimension_helpers.py    # Type coercion (datetime/json/int) + Meta ID helpers
+  metaclient.py           # Meta Graph API client: auth, retry, pagination
 ```
 
-Meta treats `until` as an exclusive boundary. Page Insights uses daily periods. Post Insights is stored as a lifetime snapshot under the run snapshot date because Meta does not guarantee daily values for the selected post metrics.
+## How a Dimension Module Works (pattern used by all of them)
 
-## Configuration
+Every file in `dimensions/` follows the same shape:
 
-Copy `.env.example` to `.env` and configure the values. Environment names use the `METAETL_` prefix.
+1. `_extract(client, token, parent_ids)` — calls the Meta Graph API, paginating over one or more parent IDs (e.g. one call per ad account).
+2. `_transform(raw_rows)` — flattens the JSON into a flat `pandas.DataFrame` matching the target table's columns.
+3. `dimension_x(db_connection, metaclient, token, last_run)` — opens a DB session, resolves an access token, runs extract → transform → `upsert()`, and closes cleanly.
 
-```text
-METAETL_DATABASE_BACKEND=sqlite
-METAETL_SQLITE_PATH=metaetl.sqlite3
-METAETL_USER_TOKEN=...
-METAETL_POST_INSIGHTS_MODE=recent
-METAETL_POST_INSIGHTS_LIMIT=1000
+Fact modules (`facts/`) follow the same extract → transform → load shape, but scope the API pull to a `since`/`until` date window instead of a parent-ID list.
+
+## Setup
+
+Requires (not included in this file set, expected in a `config.py`):
+
+```python
+class Settings:
+    database_backend: str        # "sqlserver" or "sqlite"
+    sql_schema: str              # "STG.Marketing"
+    sqlalchemy_url() -> str
+    api_version: str             # e.g. "v21.0"
+    token_source: str            # "env" | "db" | "auto"
+    user_token: str | None
+    token_query: str | None
+    page_access_token: str | None
+    post_insights_mode: str      # "recent" | "all"
+    post_insights_limit: int
 ```
 
-`METAETL_POST_INSIGHTS_MODE=recent` limits Post Insights to the newest staged posts by `CreatedTime`. Set it to `all` for every staged post. The default limit is 1,000. Older posts are intentionally not refreshed in `recent` mode; increase the limit or use `all` for full post coverage.
+Environment variable expected: `METAETL_USER_TOKEN` (per `resolve_token()` error message), or a DB-stored token reachable via `token_query`.
 
-For SQL Server with Windows authentication:
+## Running It
 
-```text
-METAETL_DATABASE_BACKEND=sqlserver
-METAETL_SQL_SERVER=server-name
-METAETL_SQL_DATABASE=DataWarehouse
-METAETL_SQL_USE_WINDOWS_AUTH=true
+```python
+from main import run_staging
+
+# Daily run — dimensions, then facts for "yesterday"
+run_staging()
 ```
 
-For SQL authentication set `METAETL_SQL_USE_WINDOWS_AUTH=false`, `METAETL_SQL_USERNAME`, and `METAETL_SQL_PASSWORD`.
+```python
+from main import run_month_backfill
 
-## Data Flow
-
-Dimensions run before facts on every scheduled run:
-
-```text
-Business -> AdAccount -> Campaign -> AdSet -> Ad/Creative -> Page -> Post
+# Historical backfill for AdInsightsDaily + PageInsightsDaily only
+# (chunked into 10-day windows, run concurrently, up to 10 workers)
+run_month_backfill(since="2026-08-01", until="2026-09-01", chunk_days=10)
 ```
 
-Facts run afterward and are isolated from one another:
+```python
+from main import run_post_insights_backfill
 
-```text
-AdInsightsDaily
-PageInsightsDaily
-PostInsightsDaily
+# One-time backfill for PostInsightsDaily across ALL posts (threaded).
+# Run this once to seed history; daily run_staging() adds one row per post per day after that.
+run_post_insights_backfill(max_workers=50)
 ```
 
-Fact keys:
-
-- AdInsightsDaily: `AdID`, `Date`
-- PageInsightsDaily: `PageID`, `Date`, `MetricName`
-- PostInsightsDaily: `PostID`, `Date` where `Date` is the lifetime snapshot date
-
-Repeated daily runs are therefore idempotent for the same date window.
-
-## Historical Backfill
-
-Do not run a month backfill from the scheduled daily task. Run it manually from the project directory:
-
-```cmd
-uv run python -c "from main import run_month_backfill; run_month_backfill('2026-08-01', '2026-09-01')"
-```
-
-The `run_month_backfill` function is defined in `main.py` and loads all three facts for the requested window.
-
-## Windows Task Scheduler
-
-1. Ensure `uv` is installed and available to the task account.
-2. Copy `.env.example` to `.env` and configure the token and database.
-3. Run `register_metaetl_task.cmd` from the project directory. It registers `MetaETL Daily` at 02:00 every day.
-4. In Task Scheduler, configure the task account, password, working directory, and whether it may run while logged off.
-5. Review `logs/scheduler.log` and the monthly files under `logs/` after each run.
-
-To use another time, edit `/ST 02:00` in `register_metaetl_task.cmd`.
-
-To remove the task:
-
-```cmd
-schtasks /Delete /TN "MetaETL Daily" /F
-```
-
-## Validation
-
-```cmd
-uv run python -c "import main; print('ok')"
-```
-
-A real API run requires a valid token, required Meta permissions, and access to the selected database.
+> **Never run `run_post_insights_backfill` from the daily scheduled job** — it's a one-time seed, not a recurring task.

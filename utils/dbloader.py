@@ -9,16 +9,33 @@ from models import Base
 from utils.logging import logger
 
 
+# def get_engine(settings: Settings | None = None) -> Engine:
+#     settings = settings or get_conf()
+#     engine_kwargs = {"future": True}
+#     if settings.database_backend.lower() == "sqlserver":
+#         engine_kwargs["fast_executemany"] = True
+#     engine = create_engine(settings.sqlalchemy_url(), **engine_kwargs)
+#     if settings.database_backend.lower() == "sqlite":
+#         return engine.execution_options(schema_translate_map={"STG.Marketing": None})
+#     return engine
+
 def get_engine(settings: Settings | None = None) -> Engine:
     settings = settings or get_conf()
     engine_kwargs = {"future": True}
+    
     if settings.database_backend.lower() == "sqlserver":
         engine_kwargs["fast_executemany"] = True
+        # Map the schema string directly to escaped brackets for MSSQL
+        engine = create_engine(settings.sqlalchemy_url(), **engine_kwargs)
+        return engine.execution_options(
+            schema_translate_map={settings.sql_schema: f"[{settings.sql_schema}]"}
+        )
+        
     engine = create_engine(settings.sqlalchemy_url(), **engine_kwargs)
     if settings.database_backend.lower() == "sqlite":
-        return engine.execution_options(schema_translate_map={"STG.Marketing": None})
+        return engine.execution_options(schema_translate_map={settings.sql_schema: None})
+        
     return engine
-
 
 def create_schema(engine: Engine) -> None:
     Base.metadata.create_all(engine)
@@ -85,18 +102,26 @@ def upsert(
                 else:
                     record[column] = value
             records.append(record)
+
+        inserted = 0
+        updated = 0
         for record in records:
             record.setdefault("LoadDate", datetime.now())
             filters = [getattr(model, key) == record[key] for key in key_columns]
             existing = session.execute(select(model).where(*filters)).scalar_one_or_none()
             if existing is None:
                 session.add(model(**record))
+                inserted += 1
             else:
                 for column, value in record.items():
                     setattr(existing, column, value)
+                updated += 1
         if commit:
             session.commit()
-        logger.info("Upserted %d rows into %s", len(records), model.__tablename__)
+        logger.info(
+            "Upserted %d rows into %s (%d inserted, %d updated)",
+            len(records), model.__tablename__, inserted, updated,
+        )
         return len(records)
     except Exception:
         session.rollback()
@@ -105,3 +130,5 @@ def upsert(
     finally:
         if owns_session:
             session.close()
+
+

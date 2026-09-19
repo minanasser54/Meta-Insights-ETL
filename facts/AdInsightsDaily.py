@@ -21,7 +21,10 @@ FIELDS = (
 )
 PARAMS = {"level": "ad", "time_increment": 1, "fields": FIELDS, "limit": 100}
 KEY_COLUMNS = ["AdID", "DateKey"]
-LEAD_ACTION_TYPES = {"lead", "onsite_conversion.lead", "leadgen_grouped"}
+
+# LEAD_ACTION_TYPES = {"lead", "onsite_conversion.lead", "leadgen_grouped"}
+LEAD_ACTION_TYPES = {"lead"}
+
 OUTPUT_COLUMNS = [
     "AdID", "AdSetID", "CampaignID", "AdAccountID", "Date", "DateKey", "Impressions", "Reach",
     "Frequency", "Spend", "SocialSpend", "Clicks", "UniqueClicks", "CPC", "CPP", "InlineLinkClicks",
@@ -56,6 +59,7 @@ def _extract(client: MetaClient, token: str, account_ids: list[str], since: str,
         try:
             for page in client.paginate(f"/act_{bare_account_id(account_id)}/insights", token, params):
                 rows.extend(page)
+            logger.info("AdInsightsDaily fetch done for AccountID=%s", account_id)
         except Exception:
             logger.exception("AdInsightsDaily fetch failed for AccountID=%s", account_id)
             continue

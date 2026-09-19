@@ -35,6 +35,7 @@ def _extract(client: MetaClient, user_token: str, page_ids: list[str], since: st
                         day = period_end - timedelta(days=1) if period_end else None
                         if day and since <= day.isoformat() < until:
                             rows.append({"PageID": page_id, "Date": day, "MetricName": metric.get("name"), "Value": value.get("value")})
+            logger.info("PageInsightsDaily fetch done for PageID=%s", page_id)
         except Exception:
             logger.exception("PageInsightsDaily fetch failed for PageID=%s", page_id)
             continue
@@ -67,7 +68,18 @@ def fact_page_insights_daily(
         access_token = token or resolve_token(session)
         log_fact_window("PageInsightsDaily", since, until, len(page_ids))
         rows = _transform(_extract(client, access_token, page_ids, since, until))
-        session.execute(delete(PageInsightsDaily).where(PageInsightsDaily.Date >= date.fromisoformat(until)))
+        # Scoped to [since, until) — this call's own range only. Deleting
+        # everything >= until (the old behavior) breaks when multiple chunked
+        # date ranges run concurrently: a later chunk's delete would wipe out
+        # rows an earlier or later chunk had just inserted, since ">= until"
+        # has no lower bound and isn't safe to run from more than one call at
+        # a time.
+        session.execute(
+            delete(PageInsightsDaily).where(
+                PageInsightsDaily.Date >= date.fromisoformat(since),
+                PageInsightsDaily.Date < date.fromisoformat(until),
+            )
+        )
         session.commit()
         return upsert(rows, PageInsightsDaily, KEY_COLUMNS, session=session)
     finally:
@@ -79,3 +91,4 @@ def fact_page_insights_daily(
 
 if __name__ == "__main__":
     fact_page_insights_daily()
+

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone ,date  
 
 import pandas as pd
 from sqlalchemy import Connection, Engine
@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from models import Page, Post
 from config import get_conf
 from utils.dbloader import open_session, read_ids, resolve_token, upsert
-from utils.dimension_helpers import as_datetime
+from utils.dimension_helpers import as_datetime, get_watermarks
 from utils.logging import logger
 from utils.metaclient import MetaClient, get_client
 
@@ -17,6 +17,12 @@ PARAMS = {"fields": FIELDS, "limit": 100}
 KEY_COLUMNS = ["PostID"]
 OUTPUT_COLUMNS = ["PostID", "PageID", "CreatedTime", "UpdatedTime", "PermalinkURL", "StatusType", "IsPublished", "IsExpired", "IsHidden"]
 
+# /posts `since` filters on created_time, NOT updated_time, so edits to old posts
+# (IsHidden/IsPublished/IsExpired/...) are invisible to it. Re-fetch everything created
+# within this window on every run so recent posts keep their flags in sync. Older posts
+# are only refreshed by full_refresh=True.
+POST_LOOKBACK = timedelta(days=30)
+FULL_REFRESH_WEEKDAY = 3
 
 def _page_tokens(client: MetaClient, user_token: str) -> dict[str, str]:
     tokens: dict[str, str] = {}
@@ -27,7 +33,21 @@ def _page_tokens(client: MetaClient, user_token: str) -> dict[str, str]:
     return tokens
 
 
-def _extract(client: MetaClient, user_token: str, page_ids: list[str]) -> list[dict]:
+def _since_params(watermark: datetime | None) -> dict:
+    params = dict(PARAMS)  # never mutate the module-level dict
+    if watermark is not None:
+        # Stored values are naive UTC (see as_datetime), so tag as UTC before converting.
+        since_dt = watermark.replace(tzinfo=timezone.utc) - POST_LOOKBACK
+        params["since"] = int(since_dt.timestamp())
+    return params
+
+
+def _extract(
+    client: MetaClient,
+    user_token: str,
+    page_ids: list[str],
+    watermarks: dict[str, datetime],
+) -> list[dict]:
     if not page_ids:
         return []
     tokens = _page_tokens(client, user_token)
@@ -37,11 +57,19 @@ def _extract(client: MetaClient, user_token: str, page_ids: list[str]) -> list[d
         if not page_token:
             logger.warning("Skipping Post fetch because no Page access token was returned for PageID=%s", page_id)
             continue
+        watermark = watermarks.get(str(page_id))
+        params = _since_params(watermark)
+        page_rows = 0
         try:
-            for page in client.paginate(f"/{page_id}/posts", page_token, PARAMS):
+            for page in client.paginate(f"/{page_id}/posts", page_token, params):
                 for post in page:
                     post["_page_id"] = page_id
                     rows.append(post)
+                    page_rows += 1
+            logger.info(
+                "Post fetch done for PageID=%s (%s): %d row(s)",
+                page_id, "full" if watermark is None else f"since {watermark.isoformat()} minus {POST_LOOKBACK}", page_rows,
+            )
         except Exception:
             logger.exception("Post fetch failed for PageID=%s", page_id)
             continue
@@ -71,21 +99,38 @@ def dimension_post(
     db_connection: Engine | Connection | Session | None = None,
     metaclient: MetaClient | None = None,
     token: str | None = None,
-    last_run: datetime | None = None,
+    last_run: datetime | None = None,  # unused: kept so run_staging's call signature stays compatible
+    full_refresh: bool | None = None,  # None = auto (full on FULL_REFRESH_WEEKDAY); True/False forces the mode
 ) -> int:
     session, owns_session = open_session(db_connection)
     client = metaclient or get_client()
     try:
+        if full_refresh is None:
+            full_refresh = date.today().weekday() == FULL_REFRESH_WEEKDAY
+            if full_refresh:
+                logger.info("Today is the weekly Post full-refresh day; ignoring watermarks")
+
         page_ids = read_ids(session, Page, "PageID")
         access_token = token or resolve_token(session)
-        logger.info("Extracting Post for %d page(s); last_run=%s", len(page_ids), last_run)
-        return upsert(_transform(_extract(client, access_token, page_ids)), Post, KEY_COLUMNS, session=session)
+
+        # Watermark = newest CreatedTime already stored per page (since filters on created_time).
+        watermarks = {} if full_refresh else get_watermarks(session, Post, "PageID", time_column="CreatedTime")
+        logger.info(
+            "Extracting Post for %d page(s) (%s, lookback=%s); %d with watermark",
+            len(page_ids), "FULL REFRESH" if full_refresh else "incremental", POST_LOOKBACK, len(watermarks),
+        )
+
+        raw = _extract(client, access_token, page_ids, watermarks)
+        if not raw:
+            logger.info("No new or updated Post rows; nothing to upsert")
+            return 0
+        return upsert(_transform(raw), Post, KEY_COLUMNS, session=session)
     finally:
         if owns_session:
             session.close()
         if metaclient is None:
             client.close()
 
-
 if __name__ == "__main__":
     dimension_post()
+
