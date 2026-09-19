@@ -6,7 +6,15 @@ from sqlalchemy.orm import Session
 
 from models import Ad, AdAccount, AdSet, Creative
 from utils.dbloader import open_session, resolve_token, upsert
-from utils.dimension_helpers import as_datetime, as_int, as_json, bare_account_id
+from utils.dimension_helpers import (
+    UPDATED_SINCE_BUFFER,
+    as_datetime,
+    as_int,
+    as_json,
+    bare_account_id,
+    get_watermarks,
+    with_updated_filter,
+)
 from utils.logging import logger
 from utils.metaclient import MetaClient, get_client
 
@@ -27,11 +35,27 @@ AD_COLUMNS = [
 CREATIVE_COLUMNS = ["CreativeId", "CreativeName"]
 
 
-def _extract(client: MetaClient, token: str, account_ids: list[str], parent_by_adset: dict[str, dict]) -> list[dict]:
+def _extract(
+    client: MetaClient,
+    token: str,
+    account_ids: list[str],
+    parent_by_adset: dict[str, dict],
+    watermarks: dict[str, datetime],
+) -> list[dict]:
     rows: list[dict] = []
+    full_count = 0
+    incremental_count = 0
     for index, account_id in enumerate(account_ids, start=1):
+        bare_id = bare_account_id(account_id)
+        watermark = watermarks.get(bare_id)
+        params = with_updated_filter(PARAMS, watermark)
+        if watermark is None:
+            full_count += 1
+        else:
+            incremental_count += 1
+        account_rows = 0
         try:
-            for page in client.paginate(f"/act_{bare_account_id(account_id)}/ads", token, PARAMS):
+            for page in client.paginate(f"/act_{bare_id}/ads", token, params):
                 for ad in page:
                     adset_id = str(ad.get("adset_id")) if ad.get("adset_id") else None
                     parent = parent_by_adset.get(adset_id)
@@ -44,12 +68,22 @@ def _extract(client: MetaClient, token: str, account_ids: list[str], parent_by_a
                     ad["_campaign_id"] = parent["CampaignID"]
                     ad["_account_id"] = bare_account_id(parent["AdAccountID"] or account_id)
                     rows.append(ad)
-            logger.info("Ad fetch done for AccountID=%s", account_id)
+                    account_rows += 1
+            logger.info(
+                "Ad fetch done for AccountID=%s (%s): %d row(s)",
+                account_id, "full" if watermark is None else f"since {watermark.isoformat()}", account_rows,
+            )
         except Exception:
+            # Nothing is stored for this account, so its watermark doesn't advance
+            # and the next run retries the same window.
             logger.exception("Ad fetch failed for AccountID=%s", account_id)
             continue
         if index == len(account_ids) or index % 10 == 0:
             logger.info("Processed %d/%d ad accounts for Ad and Creative", index, len(account_ids))
+    logger.info(
+        "Ad extract summary: %d account(s) full, %d incremental, %d row(s) fetched",
+        full_count, incremental_count, len(rows),
+    )
     return rows
 
 
@@ -89,7 +123,8 @@ def dimension_ad_and_creative(
     db_connection: Engine | Connection | Session | None = None,
     metaclient: MetaClient | None = None,
     token: str | None = None,
-    last_run: datetime | None = None,
+    last_run: datetime | None = None,  # unused: kept so run_staging's call signature stays compatible
+    full_refresh: bool = False,        # True bypasses watermarks (e.g. weekly job to catch hard deletes/missed rows)
 ) -> int:
     session, owns_session = open_session(db_connection)
     client = metaclient or get_client()
@@ -104,8 +139,19 @@ def dimension_ad_and_creative(
             for row in adset_rows
         }
         access_token = token or resolve_token(session)
-        logger.info("Extracting Ad and Creative for %d account(s); last_run=%s", len(account_ids), last_run)
-        ads, creatives = _transform(_extract(client, access_token, account_ids, parent_by_adset), parent_by_adset)
+
+        watermarks = {} if full_refresh else get_watermarks(session, Ad, "AdAccountID")
+        logger.info(
+            "Extracting Ad and Creative for %d account(s) (%s, buffer=%s); %d with watermark",
+            len(account_ids), "FULL REFRESH" if full_refresh else "incremental",
+            UPDATED_SINCE_BUFFER, len(watermarks),
+        )
+
+        raw = _extract(client, access_token, account_ids, parent_by_adset, watermarks)
+        if not raw:
+            logger.info("No new or updated Ad rows; nothing to upsert")
+            return 0
+        ads, creatives = _transform(raw, parent_by_adset)
         creative_count = upsert(creatives, Creative, CREATIVE_KEYS, session=session, commit=False)
         ad_count = upsert(ads, Ad, AD_KEYS, session=session)
         return creative_count + ad_count
@@ -121,3 +167,4 @@ dimension_adandcreative = dimension_ad_and_creative
 
 if __name__ == "__main__":
     dimension_ad_and_creative()
+

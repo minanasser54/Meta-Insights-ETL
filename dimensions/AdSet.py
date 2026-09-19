@@ -6,7 +6,14 @@ from sqlalchemy.orm import Session
 
 from models import AdAccount, AdSet, Campaign
 from utils.dbloader import open_session, resolve_token, upsert
-from utils.dimension_helpers import as_datetime, as_json, bare_account_id
+from utils.dimension_helpers import (
+    UPDATED_SINCE_BUFFER,
+    as_datetime,
+    as_json,
+    bare_account_id,
+    get_watermarks,
+    with_updated_filter,
+)
 from utils.logging import logger
 from utils.metaclient import MetaClient, get_client
 
@@ -31,20 +38,45 @@ OUTPUT_COLUMNS = [
 ]
 
 
-def _extract(client: MetaClient, token: str, account_ids: list[str]) -> list[dict]:
+def _extract(
+    client: MetaClient,
+    token: str,
+    account_ids: list[str],
+    watermarks: dict[str, datetime],
+) -> list[dict]:
     rows: list[dict] = []
+    full_count = 0
+    incremental_count = 0
     for index, account_id in enumerate(account_ids, start=1):
+        bare_id = bare_account_id(account_id)
+        watermark = watermarks.get(bare_id)
+        params = with_updated_filter(PARAMS, watermark)
+        if watermark is None:
+            full_count += 1
+        else:
+            incremental_count += 1
+        account_rows = 0
         try:
-            for page in client.paginate(f"/act_{bare_account_id(account_id)}/adsets", token, PARAMS):
+            for page in client.paginate(f"/act_{bare_id}/adsets", token, params):
                 for adset in page:
-                    adset["_account_id"] = bare_account_id(account_id)
+                    adset["_account_id"] = bare_id
                     rows.append(adset)
-            logger.info("AdSet fetch done for AccountID=%s", account_id)
+                    account_rows += 1
+            logger.info(
+                "AdSet fetch done for AccountID=%s (%s): %d row(s)",
+                account_id, "full" if watermark is None else f"since {watermark.isoformat()}", account_rows,
+            )
         except Exception:
+            # Nothing is stored for this account, so its watermark doesn't advance
+            # and the next run retries the same window.
             logger.exception("AdSet fetch failed for AccountID=%s", account_id)
             continue
         if index == len(account_ids) or index % 10 == 0:
             logger.info("Processed %d/%d ad accounts for AdSet", index, len(account_ids))
+    logger.info(
+        "AdSet extract summary: %d account(s) full, %d incremental, %d row(s) fetched",
+        full_count, incremental_count, len(rows),
+    )
     return rows
 
 
@@ -102,7 +134,8 @@ def dimension_adset(
     db_connection: Engine | Connection | Session | None = None,
     metaclient: MetaClient | None = None,
     token: str | None = None,
-    last_run: datetime | None = None,
+    last_run: datetime | None = None,  # unused: kept so run_staging's call signature stays compatible
+    full_refresh: bool = False,        # True bypasses watermarks (e.g. weekly job to catch hard deletes/missed rows)
 ) -> int:
     session, owns_session = open_session(db_connection)
     client = metaclient or get_client()
@@ -110,9 +143,19 @@ def dimension_adset(
         account_ids = [str(value) for value in session.execute(AdAccount.__table__.select().with_only_columns(AdAccount.AccountID)).scalars()]
         campaign_ids = {str(value) for value in session.execute(Campaign.__table__.select().with_only_columns(Campaign.CampaignID)).scalars()}
         access_token = token or resolve_token(session)
-        logger.info("Extracting AdSet for %d account(s); %d campaign IDs loaded from DB; last_run=%s", len(account_ids), len(campaign_ids), last_run)
-        rows = _transform(_extract(client, access_token, account_ids), campaign_ids)
-        return upsert(rows, AdSet, KEY_COLUMNS, session=session)
+
+        watermarks = {} if full_refresh else get_watermarks(session, AdSet, "AdAccountID")
+        logger.info(
+            "Extracting AdSet for %d account(s) (%s, buffer=%s); %d with watermark; %d campaign IDs loaded from DB",
+            len(account_ids), "FULL REFRESH" if full_refresh else "incremental",
+            UPDATED_SINCE_BUFFER, len(watermarks), len(campaign_ids),
+        )
+
+        raw = _extract(client, access_token, account_ids, watermarks)
+        if not raw:
+            logger.info("No new or updated AdSet rows; nothing to upsert")
+            return 0
+        return upsert(_transform(raw, campaign_ids), AdSet, KEY_COLUMNS, session=session)
     finally:
         if owns_session:
             session.close()

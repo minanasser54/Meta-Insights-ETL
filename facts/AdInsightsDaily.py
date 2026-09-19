@@ -21,7 +21,10 @@ FIELDS = (
 )
 PARAMS = {"level": "ad", "time_increment": 1, "fields": FIELDS, "limit": 100}
 KEY_COLUMNS = ["AdID", "DateKey"]
-LEAD_ACTION_TYPES = {"lead", "onsite_conversion.lead", "leadgen_grouped"}
+
+# LEAD_ACTION_TYPES = {"lead", "onsite_conversion.lead", "leadgen_grouped"}
+LEAD_ACTION_TYPES = {"lead"}
+
 OUTPUT_COLUMNS = [
     "AdID", "AdSetID", "CampaignID", "AdAccountID", "Date", "DateKey", "Impressions", "Reach",
     "Frequency", "Spend", "SocialSpend", "Clicks", "UniqueClicks", "CPC", "CPP", "InlineLinkClicks",

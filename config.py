@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     post_insights_mode: str = "recent"
     post_insights_limit: int = 1000
 
+    full_refresh: bool = False
+
     @property
     def base_url(self) -> str:
         return f"https://graph.facebook.com/{self.api_version}"

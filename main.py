@@ -19,6 +19,9 @@ from utils.dbloader import create_schema, get_engine
 from utils.logging import logger
 from utils.metaclient import MetaClient
 
+from config import get_conf
+
+configs=get_conf()
 
 def run_staging(
     db_connection: Engine | Connection | Session | None = None,
@@ -40,8 +43,12 @@ def run_staging(
     )
     for name, dimension in dimensions:
         try:
-            loaded = dimension(db_connection=engine, metaclient=metaclient, token=token, last_run=last_run)
-            logger.info("Dimension %s completed: %d rows", name, loaded)
+            if name=="Campaign" or name=="AdSet" or name=="Ad and Creative" or name=="Post" :
+                loaded = dimension(db_connection=engine, metaclient=metaclient, token=token, last_run=last_run,full_refresh=configs.full_refresh)
+                logger.info("Dimension %s completed: %d rows", name, loaded)
+            else :
+                loaded = dimension(db_connection=engine, metaclient=metaclient, token=token, last_run=last_run)
+                logger.info("Dimension %s completed: %d rows", name, loaded)
         except Exception:
             logger.exception("Dimension %s failed; continuing with the next dimension", name)
     facts = (
@@ -138,8 +145,8 @@ if __name__ == "__main__":
 
     # Historical backfill example. Run manually
 
-    # run_month_backfill(since="2026-01-01", until="2026-09-14", chunk_days=10)
-    # run_post_insights_backfill(50)
+    #run_month_backfill(since="2026-09-01", until="2026-09-10", chunk_days=10)
+    #run_post_insights_backfill(50)
 
 
 

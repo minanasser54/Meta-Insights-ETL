@@ -102,18 +102,26 @@ def upsert(
                 else:
                     record[column] = value
             records.append(record)
+
+        inserted = 0
+        updated = 0
         for record in records:
             record.setdefault("LoadDate", datetime.now())
             filters = [getattr(model, key) == record[key] for key in key_columns]
             existing = session.execute(select(model).where(*filters)).scalar_one_or_none()
             if existing is None:
                 session.add(model(**record))
+                inserted += 1
             else:
                 for column, value in record.items():
                     setattr(existing, column, value)
+                updated += 1
         if commit:
             session.commit()
-        logger.info("Upserted %d rows into %s", len(records), model.__tablename__)
+        logger.info(
+            "Upserted %d rows into %s (%d inserted, %d updated)",
+            len(records), model.__tablename__, inserted, updated,
+        )
         return len(records)
     except Exception:
         session.rollback()
@@ -124,60 +132,3 @@ def upsert(
             session.close()
 
 
-
-# def upsert(
-#     df: pd.DataFrame,
-#     model: type[Base],
-#     key_columns: list[str],
-#     session: Session | None = None,
-#     engine: Engine | None = None,
-#     commit: bool = True,
-# ) -> int:
-#     if df.empty:
-#         logger.info("No rows to load into %s", model.__tablename__)
-#         return 0
-#     if session is None:
-#         if engine is None:
-#             engine = get_engine()
-#         session = get_session_factory(engine)()
-#         owns_session = True
-#     else:
-#         owns_session = False
-
-#     try:
-#         records = []
-#         for raw_record in df.to_dict(orient="records"):
-#             record = {}
-#             for column, value in raw_record.items():
-#                 if value is None or value is pd.NaT:
-#                     record[column] = None
-#                 elif pd.api.types.is_scalar(value) and pd.isna(value):
-#                     record[column] = None
-#                 else:
-#                     record[column] = value
-#             records.append(record)
-
-#         for record in records:
-#             record.setdefault("LoadDate", datetime.now())
-#             filters = [getattr(model, key) == record[key] for key in key_columns]
-#             existing = session.execute(select(model).where(*filters)).scalar_one_or_none()
-#             if existing is None:
-#                 session.add(model(**record))
-#             else:
-#                 for column, value in record.items():
-#                     # Skip updating primary/key columns to avoid identity update errors
-#                     if column in key_columns:
-#                         continue
-#                     setattr(existing, column, value)
-
-#         if commit:
-#             session.commit()
-#         logger.info("Upserted %d rows into %s", len(records), model.__tablename__)
-#         return len(records)
-#     except Exception:
-#         session.rollback()
-#         logger.exception("Failed loading %s", model.__tablename__)
-#         raise
-#     finally:
-#         if owns_session:
-#             session.close()
