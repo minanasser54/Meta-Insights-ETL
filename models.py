@@ -224,12 +224,6 @@ class PostInsightsDaily(Base):
 
 
 class EtlWatermark(Base):
-    """One row per ETL run of a dimension/fact table.
-
-    Lifecycle: inserted as Status='Running' with EndTime NULL when the run starts,
-    then updated to 'Success' or 'Failed' (with EndTime) when it finishes.
-    Incremental loads read MAX(StartTime) of the 'Success' rows for their table.
-    """
     __tablename__ = WATERMARK_TABLE
     __table_args__ = (
         Index("IX_metaadsetl_TableName_Status_StartTime", "TableName", "Status", "StartTime"),

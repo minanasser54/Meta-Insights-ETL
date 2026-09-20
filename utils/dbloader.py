@@ -42,7 +42,7 @@ def get_engine(settings: Settings | None = None) -> Engine:
 
 def create_schema(engine: Engine) -> None:
     if engine.dialect.name == "mssql":
-        # create_all() creates tables but not schemas; make sure the watermark schema exists.
+        #create_all() creates tables but not schemas; make sure the watermark schema exists.
         with engine.begin() as conn:
             conn.execute(text(
                 f"IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = N'{WATERMARK_SCHEMA}') "

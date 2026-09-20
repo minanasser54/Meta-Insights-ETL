@@ -43,7 +43,7 @@ def run_staging(
     )
     for name, dimension in dimensions:
         try:
-            if name=="Campaign" or name=="AdSet" or name=="Ad and Creative" or name=="Post" :
+            if name=="Campaign" or name=="AdSet" or name=="Ad and Creative":
                 loaded = dimension(db_connection=engine, metaclient=metaclient, token=token, last_run=last_run,full_refresh=configs.full_refresh)
                 logger.info("Dimension %s completed: %d rows", name, loaded)
             else :

@@ -54,10 +54,6 @@ class WatermarkRun:
 
 
 def get_last_success_start(session: Session, table_name: str) -> datetime | None:
-    """Latest StartTime of a successful run of `table_name`, or None.
-
-    On any DB error returns None so the run falls back to a full fetch rather than failing.
-    """
     try:
         return session.execute(
             select(func.max(EtlWatermark.StartTime)).where(
@@ -72,11 +68,6 @@ def get_last_success_start(session: Session, table_name: str) -> datetime | None
 
 
 def _finish(session: Session, run_id: int, status: str) -> None:
-    """Close the run row. Never raises: a logging problem must not mask the ETL result.
-
-    If this update itself fails the row stays 'Running', which the watermark ignores,
-    so the next run simply re-fetches from the previous successful start.
-    """
     try:
         if status == STATUS_FAILED:
             session.rollback()  # the session may be mid-failure; make it usable again
@@ -130,12 +121,6 @@ def track_run(
 
 
 def raise_if_failed(name: str, failed_parents: list[str]) -> None:
-    """Fail the run if any parent (account/page) could not be fetched.
-
-    The rows that *were* fetched are upserted first; raising afterwards marks the run
-    'Failed' so the watermark does not advance past data we never received. The next
-    run re-fetches from the previous successful start.
-    """
     if failed_parents:
         raise RuntimeError(
             f"{name}: fetch failed for {len(failed_parents)} parent(s) ({', '.join(failed_parents)}); "
