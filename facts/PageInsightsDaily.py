@@ -70,12 +70,6 @@ def fact_page_insights_daily(
             access_token = token or resolve_token(session)
             log_fact_window("PageInsightsDaily", since, until, len(page_ids))
             rows = _transform(_extract(client, access_token, page_ids, since, until))
-            # Scoped to [since, until) — this call's own range only. Deleting
-            # everything >= until (the old behavior) breaks when multiple chunked
-            # date ranges run concurrently: a later chunk's delete would wipe out
-            # rows an earlier or later chunk had just inserted, since ">= until"
-            # has no lower bound and isn't safe to run from more than one call at
-            # a time.
             session.execute(
                 delete(PageInsightsDaily).where(
                     PageInsightsDaily.Date >= date.fromisoformat(since),

@@ -48,7 +48,7 @@ select count(*) from [STG.Marketing].[AdInsightsDaily] -- 26,924
 select distinct(AdAccountID) from [STG.Marketing].[AdInsightsDaily]
 
 -- Post Insights Daily
-CREATE TABLE [STG.Marketing].[PostInsightsDaily]
+CREATE TABLE [STG.Marketing].[PostInsightsSnapshot]
 (
     PostID              NVARCHAR(100)   NOT NULL,
     Date                DATE            NOT NULL,
@@ -61,7 +61,7 @@ CREATE TABLE [STG.Marketing].[PostInsightsDaily]
     LoadDate            DATETIME2(0)    NOT NULL
         DEFAULT GETDATE(),
 
-    CONSTRAINT PK_STG_Marketing_PostInsightsDaily
+    CONSTRAINT PK_STG_Marketing_PostInsightsSnapshot
         PRIMARY KEY (PostID, DateKey)
 );
 GO

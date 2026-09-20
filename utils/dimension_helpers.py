@@ -8,11 +8,7 @@ from utils.logging import logger
 
 
 def with_updated_filter(params: dict, since: datetime | None) -> dict:
-    """Copy of params with a Meta `filtering` clause `updated_time > since`, or unchanged if since is None.
-
-    `since` comes from utils.watermark.track_run (last successful start minus the caller's delta).
-    """
-    params = dict(params)  # never mutate the module-level dict
+    params = dict(params)
     if since is not None:
         # Stored/computed values are naive UTC, so tag as UTC before converting.
         since_ts = int(since.replace(tzinfo=timezone.utc).timestamp())
@@ -41,9 +37,6 @@ def as_json(value: Any) -> str | None:
 
 
 def as_int(value: Any) -> int | None:
-    """Coerce a value to a plain int, e.g. for INTEGER/BIGINT columns fed by API fields
-    that may arrive as numeric strings. Returns None on any non-numeric or missing input.
-    """
     if value is None or value == "":
         return None
     try:
@@ -53,12 +46,6 @@ def as_int(value: Any) -> int | None:
 
 
 def bare_account_id(account_id: Any) -> str | None:
-    """Meta ad account IDs are addressed with an 'act_' prefix (e.g. 'act_123456') but
-    every AdAccountID foreign-key column in the warehouse (AdSet, Ad, AdInsightsDaily)
-    stores the bare numeric ID as BIGINT. Always route account IDs through this helper
-    before writing them to any AdAccountID column so the stored value is consistent and
-    castable to BIGINT downstream, regardless of which form the caller happened to have.
-    """
     if account_id is None:
         return None
     return str(account_id).removeprefix("act_")

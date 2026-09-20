@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from config import get_conf
 from facts.fact_helpers import daily_window, date_key, log_fact_window, page_tokens
-from models import Post, PostInsightsDaily
+from models import Post, PostInsightsSnapshot
 from utils.dbloader import open_session, resolve_token
 from utils.logging import logger
 from utils.metaclient import MetaClient, get_client
@@ -82,18 +82,6 @@ def _extract(
     snapshot_date: date,
     max_workers: int = 10,
 ) -> list[dict]:
-    # post_activity_by_action_type and post_reactions_by_type_total only support
-    # period=lifetime, and Meta ignores `since`/`until` for lifetime-period metrics
-    # (confirmed empirically: identical values regardless of `until`). There is no
-    # way to retrieve a historical value for a past date — lifetime always means
-    # "the cumulative total right now". So we fetch each post's current lifetime
-    # totals once per run and label the row with today's snapshot date. Running
-    # this job daily and inserting (never overwriting) builds a true day-by-day
-    # history of cumulative totals going forward.
-    #
-    # Fetching is I/O-bound (waiting on HTTP), so posts are fetched concurrently
-    # via a thread pool. MetaClient shares one requests.Session, which is safe
-    # for concurrent use.
     tokens = page_tokens(client, user_token)
     rows: list[dict] = []
     total = len(posts)
@@ -104,12 +92,12 @@ def _extract(
         page_id = str(post["PageID"])
         page_token = tokens.get(page_id) or get_conf().page_access_token
         if not page_token:
-            logger.warning("Skipping PostInsightsDaily because no Page access token exists for PageID=%s", page_id)
+            logger.warning("Skipping PostInsightsSnapshot because no Page access token exists for PageID=%s", page_id)
             return []
         try:
             return _fetch_post(client, page_token, post_id, snapshot_date)
         except Exception:
-            logger.exception("PostInsightsDaily fetch failed for PostID=%s", post_id)
+            logger.exception("PostInsightsSnapshot fetch failed for PostID=%s", post_id)
             return []
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -118,7 +106,7 @@ def _extract(
             rows.extend(future.result())
             completed += 1
             if completed == total or completed % 100 == 0:
-                logger.info("Processed %d/%d posts for PostInsightsDaily", completed, total)
+                logger.info("Processed %d/%d posts for PostInsightsSnapshot", completed, total)
     return rows
 
 
@@ -155,16 +143,13 @@ def _transform(raw_rows: list[dict], load_date: datetime) -> pd.DataFrame:
 
 
 def _to_records(df: pd.DataFrame) -> list[dict]:
-    """Convert a DataFrame to insert-ready records, replacing pandas NaN with
-    real None so SQL Server receives NULL instead of silently coercing NaN
-    into a sentinel int (e.g. -9223372036854775808 for BIGINT columns)."""
     return [
         {key: (None if pd.isna(value) else value) for key, value in record.items()}
         for record in df.to_dict(orient="records")
     ]
 
 
-def fact_post_insights_daily(
+def fact_post_insights_snapshot(
     db_connection: Engine | Connection | Session | None = None,
     metaclient: MetaClient | None = None,
     token: str | None = None,
@@ -178,7 +163,7 @@ def fact_post_insights_daily(
     session, owns_session = open_session(db_connection)
     client = metaclient or get_client()
     try:
-        with track_run(session, PostInsightsDaily.__tablename__):
+        with track_run(session, PostInsightsSnapshot.__tablename__):
             settings = get_conf()
             mode = (post_mode or settings.post_insights_mode).lower()
             limit = post_limit if post_limit is not None else settings.post_insights_limit
@@ -206,20 +191,20 @@ def fact_post_insights_daily(
             posts = [dict(row) for row in session.execute(post_query).mappings().all()]
 
             access_token = token or resolve_token(session)
-            logger.info("PostInsightsDaily mode=%s limit=%s snapshot_date=%s", mode, limit, until)
-            log_fact_window("PostInsightsDaily", since, until, len(posts))
+            logger.info("PostInsightsSnapshot mode=%s limit=%s snapshot_date=%s", mode, limit, until)
+            log_fact_window("PostInsightsSnapshot", since, until, len(posts))
 
             raw_rows = _extract(client, access_token, posts, until_date, max_workers=max_workers)
             if not raw_rows:
-                logger.warning("PostInsightsDaily returned no values for the selected posts on %s.", until)
+                logger.warning("PostInsightsSnapshot returned no values for the selected posts on %s.", until)
             load_date = datetime.now()
             rows = _transform(raw_rows, load_date)
 
             if rows.empty:
-                logger.info("No rows to insert into PostInsightsDaily")
+                logger.info("No rows to insert into PostInsightsSnapshot")
                 return 0
 
-            session.execute(insert(PostInsightsDaily), _to_records(rows))
+            session.execute(insert(PostInsightsSnapshot), _to_records(rows))
             session.commit()
             return len(rows)
     finally:
@@ -230,4 +215,4 @@ def fact_post_insights_daily(
 
 
 if __name__ == "__main__":
-    fact_post_insights_daily()
+    fact_post_insights_snapshot()

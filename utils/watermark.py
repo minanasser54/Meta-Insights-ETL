@@ -1,29 +1,13 @@
-"""ETL run log / incremental watermark, stored in Watermark.metaadsetl.
-
+"""
 Every dimension/fact run is wrapped in `track_run`:
-
     with track_run(session, "Campaign", delta=WATERMARK_DELTA) as run:
         ... fetch rows with `run.since` ...
 
-* On entry a row (TableName, StartTime=now, EndTime=NULL, Status='Running') is
-  inserted and committed immediately, so it is visible even if the run dies.
+* On entry (TableName, StartTime=now, EndTime=NULL, Status='Running')
 * On normal exit the row is updated to Status='Success' with EndTime.
-* On any exception the row is updated to Status='Failed' with EndTime and the
-  exception is re-raised.
-
+* On any exception the row is updated to Status='Failed' with EndTime and the exception is re-raised.
 `run.since` is the incremental cut-off for that table:
-
     MAX(StartTime) over that table's 'Success' rows  -  delta
-
-Only 'Success' rows count, so a failed (or crashed, still 'Running') run never
-advances the watermark. StartTime rather than EndTime is used so rows changed
-while a run was in flight are picked up by the next one; `delta` widens the
-overlap further (safe because every load is an idempotent upsert).
-`run.since` is None on the very first run, or when full_refresh=True, meaning
-"fetch everything".
-
-All timestamps are naive UTC, matching how Meta timestamps are stored elsewhere
-in the warehouse (see dimension_helpers.as_datetime).
 """
 from contextlib import contextmanager
 from dataclasses import dataclass

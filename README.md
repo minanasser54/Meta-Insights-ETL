@@ -7,9 +7,9 @@ A staging-layer ETL pipeline that pulls Facebook/Meta Marketing API data (Busine
 Each run has two phases:
 
 1. **Dimensions** — slow-changing entity data (Business → AdAccount → Campaign → AdSet → Ad/Creative → Page → Post). Loaded in that order because each step reads IDs written by the previous one.
-2. **Facts** — daily metrics tied to a date (AdInsightsDaily, PageInsightsDaily, PostInsightsDaily).
+2. **Facts** — daily metrics tied to a date (AdInsightsDaily, PageInsightsDaily, PostInsightsSnapshot).
 
-All loads are **upserts** (insert new rows, update existing ones) keyed by natural IDs, except `PostInsightsDaily`, which is **insert-only** by design (see below).
+All loads are **upserts** (insert new rows, update existing ones) keyed by natural IDs, except `PostInsightsSnapshot`, which is **insert-only** by design (see below).
 
 ## Project Structure
 
@@ -31,7 +31,7 @@ dimensions/
 facts/
   AdInsightsDaily.py      # Ad-level daily performance metrics
   PageInsightsDaily.py    # Page-level daily metrics
-  PostInsightsDaily.py    # Post-level lifetime metrics, snapshotted daily
+  PostInsightsSnapshot.py    # Post-level lifetime metrics, snapshotted daily
   fact_helpers.py         # Shared date/window/token helpers for fact modules
 
 utils/

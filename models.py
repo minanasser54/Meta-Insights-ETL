@@ -143,7 +143,8 @@ class Campaign(Base):
     __tablename__ = "Campaign"
     __table_args__ = {"schema": STAGING_SCHEMA}
     CampaignID: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
-    AdAccountID: Mapped[str] = mapped_column(NVARCHAR(500), nullable=False)
+    #AdAccountID: Mapped[str] = mapped_column(NVARCHAR(500), nullable=False)
+    AdAccountID: Mapped[str] = mapped_column(BigInteger, nullable=False)
     CampaignName: Mapped[str | None] = mapped_column(NVARCHAR(500))
     Objective: Mapped[str | None] = mapped_column(NVARCHAR(100))
     BuyingType: Mapped[str | None] = mapped_column(NVARCHAR(100))
@@ -210,8 +211,8 @@ class Post(Base):
     LoadDate: Mapped[datetime | None] = mapped_column(DateTime)
 
 
-class PostInsightsDaily(Base):
-    __tablename__ = "PostInsightsDaily"
+class PostInsightsSnapshot(Base):
+    __tablename__ = "PostInsightsSnapshot"
     __table_args__ = {"schema": STAGING_SCHEMA}
     PostID: Mapped[str] = mapped_column(NVARCHAR(100), primary_key=True, autoincrement=False)
     DateKey: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)

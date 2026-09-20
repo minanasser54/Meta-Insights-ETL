@@ -108,6 +108,7 @@ class MetaClient:
     def paginate(self, endpoint, access_token, params=None):
         seen = set()
         while endpoint:
+            #time.sleep(1)
             if endpoint in seen:
                 raise MetaError(reason='pagination_cycle')
             seen.add(endpoint)
