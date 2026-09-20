@@ -8,6 +8,7 @@ from models import Business
 from utils.dbloader import open_session, resolve_token, upsert
 from utils.logging import logger
 from utils.metaclient import MetaClient, get_client
+from utils.watermark import track_run
 
 
 ENDPOINT = "/me/adaccounts"
@@ -44,10 +45,11 @@ def dimension_business(
     session, owns_session = open_session(db_connection)
     client = metaclient or get_client()
     try:
-        access_token = token or resolve_token(session)
-        logger.info("Extracting Business; last_run=%s", last_run)
-        rows = _transform(_extract(client, access_token))
-        return upsert(rows, Business, KEY_COLUMNS, session=session)
+        with track_run(session, Business.__tablename__):
+            access_token = token or resolve_token(session)
+            logger.info("Extracting Business; last_run=%s", last_run)
+            rows = _transform(_extract(client, access_token))
+            return upsert(rows, Business, KEY_COLUMNS, session=session)
     finally:
         if owns_session:
             session.close()

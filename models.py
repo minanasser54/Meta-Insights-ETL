@@ -1,11 +1,15 @@
 from datetime import datetime
 from sqlalchemy.dialects.mssql import NVARCHAR
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, Integer, Numeric, Text
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Index, Integer, Numeric, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 STAGING_SCHEMA = "STG.Marketing"
+
+# ETL run log / watermark table:  Watermark.metaadsetl
+WATERMARK_SCHEMA = "Watermark"
+WATERMARK_TABLE = "metaadsetl"
 
 
 class Base(DeclarativeBase):
@@ -38,7 +42,7 @@ class Ad(Base):
 class AdAccount(Base):
     __tablename__ = "AdAccount"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    AccountID: Mapped[str] = mapped_column(NVARCHAR(500), primary_key=True, autoincrement=False)
+    AccountID: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
     AccountName: Mapped[str | None] = mapped_column(NVARCHAR(500))
     AccountStatus: Mapped[int | None] = mapped_column(Integer)
     DisableReason: Mapped[int | None] = mapped_column(Integer)
@@ -168,14 +172,6 @@ class Campaign(Base):
     LoadDate: Mapped[datetime | None] = mapped_column(DateTime)
 
 
-class Creative(Base):
-    __tablename__ = "Creative"
-    __table_args__ = {"schema": STAGING_SCHEMA}
-    CreativeId: Mapped[str] = mapped_column(NVARCHAR(100), primary_key=True, autoincrement=False)
-    CreativeName: Mapped[str | None] = mapped_column(NVARCHAR(255))
-    LoadDate: Mapped[datetime | None] = mapped_column(DateTime)
-
-
 class Page(Base):
     __tablename__ = "Page"
     __table_args__ = {"schema": STAGING_SCHEMA}
@@ -225,3 +221,23 @@ class PostInsightsDaily(Base):
     Comments: Mapped[int | None] = mapped_column(BigInteger)
     #LoadDate: Mapped[datetime | None] = mapped_column(DateTime, primary_key=True, autoincrement=False)
     LoadDate: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class EtlWatermark(Base):
+    """One row per ETL run of a dimension/fact table.
+
+    Lifecycle: inserted as Status='Running' with EndTime NULL when the run starts,
+    then updated to 'Success' or 'Failed' (with EndTime) when it finishes.
+    Incremental loads read MAX(StartTime) of the 'Success' rows for their table.
+    """
+    __tablename__ = WATERMARK_TABLE
+    __table_args__ = (
+        Index("IX_metaadsetl_TableName_Status_StartTime", "TableName", "Status", "StartTime"),
+        {"schema": WATERMARK_SCHEMA},
+    )
+    # BIGINT IDENTITY on SQL Server; SQLite only auto-increments a plain INTEGER primary key.
+    RunID: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    TableName: Mapped[str] = mapped_column(NVARCHAR(200), nullable=False)
+    StartTime: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    EndTime: Mapped[datetime | None] = mapped_column(DateTime)
+    Status: Mapped[str] = mapped_column(NVARCHAR(50), nullable=False)

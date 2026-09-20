@@ -8,6 +8,7 @@ from models import Business, Page
 from utils.dbloader import open_session, read_ids, resolve_token, upsert
 from utils.logging import logger
 from utils.metaclient import MetaClient, get_client
+from utils.watermark import track_run
 
 
 FIELDS = "id,name,verification_status,is_verified,is_published,business{id}"
@@ -57,10 +58,11 @@ def dimension_page(
     session, owns_session = open_session(db_connection)
     client = metaclient or get_client()
     try:
-        business_ids = read_ids(session, Business, "BusinessID")
-        access_token = token or resolve_token(session)
-        logger.info("Extracting Page for %d business(es); last_run=%s", len(business_ids), last_run)
-        return upsert(_transform(_extract(client, access_token, business_ids)), Page, KEY_COLUMNS, session=session)
+        with track_run(session, Page.__tablename__):
+            business_ids = read_ids(session, Business, "BusinessID")
+            access_token = token or resolve_token(session)
+            logger.info("Extracting Page for %d business(es); last_run=%s", len(business_ids), last_run)
+            return upsert(_transform(_extract(client, access_token, business_ids)), Page, KEY_COLUMNS, session=session)
     finally:
         if owns_session:
             session.close()

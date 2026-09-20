@@ -12,6 +12,7 @@ from models import Post, PostInsightsDaily
 from utils.dbloader import open_session, resolve_token
 from utils.logging import logger
 from utils.metaclient import MetaClient, get_client
+from utils.watermark import track_run
 
 
 METRICS = "post_activity_by_action_type,post_reactions_by_type_total"
@@ -177,49 +178,50 @@ def fact_post_insights_daily(
     session, owns_session = open_session(db_connection)
     client = metaclient or get_client()
     try:
-        settings = get_conf()
-        mode = (post_mode or settings.post_insights_mode).lower()
-        limit = post_limit if post_limit is not None else settings.post_insights_limit
-        until_date = date.fromisoformat(until)
+        with track_run(session, PostInsightsDaily.__tablename__):
+            settings = get_conf()
+            mode = (post_mode or settings.post_insights_mode).lower()
+            limit = post_limit if post_limit is not None else settings.post_insights_limit
+            until_date = date.fromisoformat(until)
 
-        base_columns = (Post.PostID, Post.PageID, Post.CreatedTime)
-        base_filters = (Post.PostID.is_not(None), Post.PageID.is_not(None))
+            base_columns = (Post.PostID, Post.PageID, Post.CreatedTime)
+            base_filters = (Post.PostID.is_not(None), Post.PageID.is_not(None))
 
-        if mode == "recent":
-            # The latest `limit` posts that existed as of the snapshot day (until).
-            post_query = (
-                Post.__table__.select()
-                .with_only_columns(*base_columns)
-                .where(*base_filters, Post.CreatedTime <= until_date)
-                .order_by(desc(Post.CreatedTime))
-                .limit(limit)
-            )
-        else:
-            post_query = (
-                Post.__table__.select()
-                .with_only_columns(*base_columns)
-                .where(*base_filters)
-                .order_by(desc(Post.CreatedTime))
-            )
-        posts = [dict(row) for row in session.execute(post_query).mappings().all()]
+            if mode == "recent":
+                # The latest `limit` posts that existed as of the snapshot day (until).
+                post_query = (
+                    Post.__table__.select()
+                    .with_only_columns(*base_columns)
+                    .where(*base_filters, Post.CreatedTime <= until_date)
+                    .order_by(desc(Post.CreatedTime))
+                    .limit(limit)
+                )
+            else:
+                post_query = (
+                    Post.__table__.select()
+                    .with_only_columns(*base_columns)
+                    .where(*base_filters)
+                    .order_by(desc(Post.CreatedTime))
+                )
+            posts = [dict(row) for row in session.execute(post_query).mappings().all()]
 
-        access_token = token or resolve_token(session)
-        logger.info("PostInsightsDaily mode=%s limit=%s snapshot_date=%s", mode, limit, until)
-        log_fact_window("PostInsightsDaily", since, until, len(posts))
+            access_token = token or resolve_token(session)
+            logger.info("PostInsightsDaily mode=%s limit=%s snapshot_date=%s", mode, limit, until)
+            log_fact_window("PostInsightsDaily", since, until, len(posts))
 
-        raw_rows = _extract(client, access_token, posts, until_date, max_workers=max_workers)
-        if not raw_rows:
-            logger.warning("PostInsightsDaily returned no values for the selected posts on %s.", until)
-        load_date = datetime.now()
-        rows = _transform(raw_rows, load_date)
+            raw_rows = _extract(client, access_token, posts, until_date, max_workers=max_workers)
+            if not raw_rows:
+                logger.warning("PostInsightsDaily returned no values for the selected posts on %s.", until)
+            load_date = datetime.now()
+            rows = _transform(raw_rows, load_date)
 
-        if rows.empty:
-            logger.info("No rows to insert into PostInsightsDaily")
-            return 0
+            if rows.empty:
+                logger.info("No rows to insert into PostInsightsDaily")
+                return 0
 
-        session.execute(insert(PostInsightsDaily), _to_records(rows))
-        session.commit()
-        return len(rows)
+            session.execute(insert(PostInsightsDaily), _to_records(rows))
+            session.commit()
+            return len(rows)
     finally:
         if owns_session:
             session.close()

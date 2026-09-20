@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 from sqlalchemy import Connection, Engine
@@ -6,16 +6,10 @@ from sqlalchemy.orm import Session
 
 from models import AdAccount, AdSet, Campaign
 from utils.dbloader import open_session, resolve_token, upsert
-from utils.dimension_helpers import (
-    UPDATED_SINCE_BUFFER,
-    as_datetime,
-    as_json,
-    bare_account_id,
-    get_watermarks,
-    with_updated_filter,
-)
+from utils.dimension_helpers import as_datetime, as_json, bare_account_id, with_updated_filter
 from utils.logging import logger
 from utils.metaclient import MetaClient, get_client
+from utils.watermark import raise_if_failed, track_run
 
 
 FIELDS = (
@@ -38,23 +32,23 @@ OUTPUT_COLUMNS = [
 ]
 
 
+# Incremental cut-off = last successful run's start (Watermark.metaadsetl) minus this delta,
+# so clock skew or late-propagating updates can't drop rows. Safe because upsert is idempotent.
+WATERMARK_DELTA = timedelta(hours=6)
+
+
 def _extract(
     client: MetaClient,
     token: str,
     account_ids: list[str],
-    watermarks: dict[str, datetime],
-) -> list[dict]:
+    since: datetime | None,
+) -> tuple[list[dict], list[str]]:
+    """Returns (rows, failed_account_ids)."""
     rows: list[dict] = []
-    full_count = 0
-    incremental_count = 0
+    failed: list[str] = []
+    params = with_updated_filter(PARAMS, since)  # updated_time > since; unfiltered if since is None
     for index, account_id in enumerate(account_ids, start=1):
         bare_id = bare_account_id(account_id)
-        watermark = watermarks.get(bare_id)
-        params = with_updated_filter(PARAMS, watermark)
-        if watermark is None:
-            full_count += 1
-        else:
-            incremental_count += 1
         account_rows = 0
         try:
             for page in client.paginate(f"/act_{bare_id}/adsets", token, params):
@@ -62,22 +56,18 @@ def _extract(
                     adset["_account_id"] = bare_id
                     rows.append(adset)
                     account_rows += 1
-            logger.info(
-                "AdSet fetch done for AccountID=%s (%s): %d row(s)",
-                account_id, "full" if watermark is None else f"since {watermark.isoformat()}", account_rows,
-            )
+            logger.info("AdSet fetch done for AccountID=%s: %d row(s)", account_id, account_rows)
         except Exception:
-            # Nothing is stored for this account, so its watermark doesn't advance
-            # and the next run retries the same window.
             logger.exception("AdSet fetch failed for AccountID=%s", account_id)
+            failed.append(bare_id)
             continue
         if index == len(account_ids) or index % 10 == 0:
             logger.info("Processed %d/%d ad accounts for AdSet", index, len(account_ids))
     logger.info(
-        "AdSet extract summary: %d account(s) full, %d incremental, %d row(s) fetched",
-        full_count, incremental_count, len(rows),
+        "AdSet extract summary: %s, %d row(s) fetched, %d account(s) failed",
+        "full" if since is None else f"updated_time > {since.isoformat()}", len(rows), len(failed),
     )
-    return rows
+    return rows, failed
 
 
 def _transform(raw_rows: list[dict], campaign_ids: set[str]) -> pd.DataFrame:
@@ -135,27 +125,28 @@ def dimension_adset(
     metaclient: MetaClient | None = None,
     token: str | None = None,
     last_run: datetime | None = None,  # unused: kept so run_staging's call signature stays compatible
-    full_refresh: bool = False,        # True bypasses watermarks (e.g. weekly job to catch hard deletes/missed rows)
+    full_refresh: bool = False,        # True ignores the watermark (e.g. periodic job to catch hard deletes/missed rows)
 ) -> int:
     session, owns_session = open_session(db_connection)
     client = metaclient or get_client()
     try:
-        account_ids = [str(value) for value in session.execute(AdAccount.__table__.select().with_only_columns(AdAccount.AccountID)).scalars()]
-        campaign_ids = {str(value) for value in session.execute(Campaign.__table__.select().with_only_columns(Campaign.CampaignID)).scalars()}
-        access_token = token or resolve_token(session)
+        with track_run(session, AdSet.__tablename__, delta=WATERMARK_DELTA, full_refresh=full_refresh) as run:
+            account_ids = [str(value) for value in session.execute(AdAccount.__table__.select().with_only_columns(AdAccount.AccountID)).scalars()]
+            campaign_ids = {str(value) for value in session.execute(Campaign.__table__.select().with_only_columns(Campaign.CampaignID)).scalars()}
+            access_token = token or resolve_token(session)
+            logger.info(
+                "Extracting AdSet for %d account(s) (%s); %d campaign IDs loaded from DB",
+                len(account_ids), "FULL REFRESH" if run.since is None else f"incremental since {run.since}", len(campaign_ids),
+            )
 
-        watermarks = {} if full_refresh else get_watermarks(session, AdSet, "AdAccountID")
-        logger.info(
-            "Extracting AdSet for %d account(s) (%s, buffer=%s); %d with watermark; %d campaign IDs loaded from DB",
-            len(account_ids), "FULL REFRESH" if full_refresh else "incremental",
-            UPDATED_SINCE_BUFFER, len(watermarks), len(campaign_ids),
-        )
-
-        raw = _extract(client, access_token, account_ids, watermarks)
-        if not raw:
-            logger.info("No new or updated AdSet rows; nothing to upsert")
-            return 0
-        return upsert(_transform(raw, campaign_ids), AdSet, KEY_COLUMNS, session=session)
+            raw, failed = _extract(client, access_token, account_ids, run.since)
+            loaded = 0
+            if raw:
+                loaded = upsert(_transform(raw, campaign_ids), AdSet, KEY_COLUMNS, session=session)
+            else:
+                logger.info("No new or updated AdSet rows; nothing to upsert")
+            raise_if_failed("AdSet", failed)
+            return loaded
     finally:
         if owns_session:
             session.close()

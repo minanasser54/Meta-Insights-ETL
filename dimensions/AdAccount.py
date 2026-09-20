@@ -6,8 +6,10 @@ from sqlalchemy.orm import Session
 
 from models import AdAccount
 from utils.dbloader import open_session, resolve_token, upsert
+from utils.dimension_helpers import as_int, bare_account_id
 from utils.logging import logger
 from utils.metaclient import MetaClient, get_client
+from utils.watermark import track_run
 
 
 ENDPOINT = "/me/adaccounts"
@@ -39,10 +41,15 @@ def _extract(client: MetaClient, token: str) -> list[dict]:
 def _transform(accounts_raw: list[dict]) -> pd.DataFrame:
     rows = []
     for account in accounts_raw:
+        # Meta returns "act_123"; store the bare numeric ID as BIGINT like every other AdAccountID column.
+        account_id = as_int(bare_account_id(account.get("id")))
+        if account_id is None:
+            logger.warning("Skipping ad account with missing/non-numeric id: %r", account.get("id"))
+            continue
         business = account.get("business") or {}
         funding = account.get("funding_source_details") or {}
         rows.append({
-            "AccountID": account.get("id"),
+            "AccountID": account_id,
             "AccountName": account.get("name"),
             "AccountStatus": account.get("account_status"),
             "DisableReason": account.get("disable_reason"),
@@ -72,10 +79,11 @@ def dimension_adaccount(
     session, owns_session = open_session(db_connection)
     client = metaclient or get_client()
     try:
-        access_token = token or resolve_token(session)
-        logger.info("Extracting AdAccount; last_run=%s", last_run)
-        rows = _transform(_extract(client, access_token))
-        return upsert(rows, AdAccount, KEY_COLUMNS, session=session)
+        with track_run(session, AdAccount.__tablename__):
+            access_token = token or resolve_token(session)
+            logger.info("Extracting AdAccount; last_run=%s", last_run)
+            rows = _transform(_extract(client, access_token))
+            return upsert(rows, AdAccount, KEY_COLUMNS, session=session)
     finally:
         if owns_session:
             session.close()

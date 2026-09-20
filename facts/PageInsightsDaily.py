@@ -10,6 +10,7 @@ from models import Page, PageInsightsDaily
 from utils.dbloader import open_session, resolve_token, upsert
 from utils.logging import logger
 from utils.metaclient import MetaClient, get_client
+from utils.watermark import track_run
 
 
 PAGE_INSIGHT_METRICS = ["page_views_total", "page_post_engagements", "page_video_views"]
@@ -64,24 +65,25 @@ def fact_page_insights_daily(
     session, owns_session = open_session(db_connection)
     client = metaclient or get_client()
     try:
-        page_ids = [str(value) for value in session.execute(Page.__table__.select().with_only_columns(Page.PageID)).scalars()]
-        access_token = token or resolve_token(session)
-        log_fact_window("PageInsightsDaily", since, until, len(page_ids))
-        rows = _transform(_extract(client, access_token, page_ids, since, until))
-        # Scoped to [since, until) — this call's own range only. Deleting
-        # everything >= until (the old behavior) breaks when multiple chunked
-        # date ranges run concurrently: a later chunk's delete would wipe out
-        # rows an earlier or later chunk had just inserted, since ">= until"
-        # has no lower bound and isn't safe to run from more than one call at
-        # a time.
-        session.execute(
-            delete(PageInsightsDaily).where(
-                PageInsightsDaily.Date >= date.fromisoformat(since),
-                PageInsightsDaily.Date < date.fromisoformat(until),
+        with track_run(session, PageInsightsDaily.__tablename__):
+            page_ids = [str(value) for value in session.execute(Page.__table__.select().with_only_columns(Page.PageID)).scalars()]
+            access_token = token or resolve_token(session)
+            log_fact_window("PageInsightsDaily", since, until, len(page_ids))
+            rows = _transform(_extract(client, access_token, page_ids, since, until))
+            # Scoped to [since, until) — this call's own range only. Deleting
+            # everything >= until (the old behavior) breaks when multiple chunked
+            # date ranges run concurrently: a later chunk's delete would wipe out
+            # rows an earlier or later chunk had just inserted, since ">= until"
+            # has no lower bound and isn't safe to run from more than one call at
+            # a time.
+            session.execute(
+                delete(PageInsightsDaily).where(
+                    PageInsightsDaily.Date >= date.fromisoformat(since),
+                    PageInsightsDaily.Date < date.fromisoformat(until),
+                )
             )
-        )
-        session.commit()
-        return upsert(rows, PageInsightsDaily, KEY_COLUMNS, session=session)
+            session.commit()
+            return upsert(rows, PageInsightsDaily, KEY_COLUMNS, session=session)
     finally:
         if owns_session:
             session.close()

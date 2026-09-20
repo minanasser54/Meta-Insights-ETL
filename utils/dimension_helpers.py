@@ -1,5 +1,5 @@
 import json
-from datetime import datetime , timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
@@ -7,43 +7,15 @@ import pandas as pd
 from utils.logging import logger
 
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+def with_updated_filter(params: dict, since: datetime | None) -> dict:
+    """Copy of params with a Meta `filtering` clause `updated_time > since`, or unchanged if since is None.
 
-# Overlap before each watermark so clock skew / late-propagating updates can't drop rows.
-# Safe because upsert is idempotent on the key column.
-UPDATED_SINCE_BUFFER = timedelta(hours=6)
-
-
-def get_watermarks(session: Session, model, group_column: str, time_column: str = "UpdatedTime") -> dict[str, datetime]:
-    """Latest `time_column` already loaded, per `group_column`: {str(group_value): datetime}.
-
-    Groups with no rows (or only NULL times) are absent, which makes callers do a full fetch
-    for them. On any DB error returns {} so the run falls back to a full fetch.
+    `since` comes from utils.watermark.track_run (last successful start minus the caller's delta).
     """
-    try:
-        result = session.execute(
-            select(getattr(model, group_column), func.max(getattr(model, time_column)))
-            .group_by(getattr(model, group_column))
-        ).all()
-    except Exception:
-        logger.exception("Could not read %s watermarks; falling back to full fetch", model.__tablename__)
-        session.rollback()
-        return {}
-    watermarks: dict[str, datetime] = {}
-    for group_value, max_time in result:
-        if group_value is None or max_time is None:
-            continue
-        watermarks[bare_account_id(group_value)] = max_time
-    return watermarks
-
-
-def with_updated_filter(params: dict, watermark: datetime | None) -> dict:
-    """Copy of params with a Meta `filtering` clause on updated_time, or unchanged if no watermark."""
     params = dict(params)  # never mutate the module-level dict
-    if watermark is not None:
-        # Stored values are naive UTC (see as_datetime), so tag as UTC before converting.
-        since_ts = int((watermark.replace(tzinfo=timezone.utc) - UPDATED_SINCE_BUFFER).timestamp())
+    if since is not None:
+        # Stored/computed values are naive UTC, so tag as UTC before converting.
+        since_ts = int(since.replace(tzinfo=timezone.utc).timestamp())
         params["filtering"] = json.dumps([
             {"field": "updated_time", "operator": "GREATER_THAN", "value": since_ts}
         ])

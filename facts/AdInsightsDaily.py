@@ -11,6 +11,7 @@ from utils.dbloader import open_session, resolve_token, upsert
 from utils.dimension_helpers import bare_account_id
 from utils.logging import logger
 from utils.metaclient import MetaClient, get_client
+from utils.watermark import track_run
 
 
 FIELDS = (
@@ -101,11 +102,12 @@ def fact_ad_insights_daily(
     session, owns_session = open_session(db_connection)
     client = metaclient or get_client()
     try:
-        account_ids = [str(value) for value in session.execute(AdAccount.__table__.select().with_only_columns(AdAccount.AccountID)).scalars()]
-        access_token = token or resolve_token(session)
-        log_fact_window("AdInsightsDaily", since, until, len(account_ids))
-        rows = _transform(_extract(client, access_token, account_ids, since, until))
-        return upsert(rows, AdInsightsDaily, KEY_COLUMNS, session=session)
+        with track_run(session, AdInsightsDaily.__tablename__):
+            account_ids = [str(value) for value in session.execute(AdAccount.__table__.select().with_only_columns(AdAccount.AccountID)).scalars()]
+            access_token = token or resolve_token(session)
+            log_fact_window("AdInsightsDaily", since, until, len(account_ids))
+            rows = _transform(_extract(client, access_token, account_ids, since, until))
+            return upsert(rows, AdInsightsDaily, KEY_COLUMNS, session=session)
     finally:
         if owns_session:
             session.close()

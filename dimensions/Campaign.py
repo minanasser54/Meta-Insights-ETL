@@ -1,15 +1,15 @@
-import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import pandas as pd
-from sqlalchemy import Connection, Engine, func, select
+from sqlalchemy import Connection, Engine
 from sqlalchemy.orm import Session
 
 from models import AdAccount, Campaign
 from utils.dbloader import open_session, read_ids, resolve_token, upsert
-from utils.dimension_helpers import as_datetime, as_json, bare_account_id
+from utils.dimension_helpers import as_datetime, as_json, bare_account_id, with_updated_filter
 from utils.logging import logger
 from utils.metaclient import MetaClient, get_client
+from utils.watermark import raise_if_failed, track_run
 
 
 FIELDS = (
@@ -31,66 +31,23 @@ OUTPUT_COLUMNS = [
     "StartTime", "StopTime", "CreatedTime", "UpdatedTime",
 ]
 
-# Re-fetch window before each account's watermark so clock skew or late-propagating
-# updates can't drop rows. Safe because upsert is idempotent on CampaignID.
-UPDATED_SINCE_BUFFER = timedelta(days=1)
-
-
-def _get_account_watermarks(session: Session) -> dict[str, datetime]:
-    """Latest UpdatedTime already loaded, per ad account: {bare_account_id: datetime}.
-
-    Accounts with no campaigns (or only NULL UpdatedTime) are absent from the result,
-    which makes them get a full fetch. On any DB error returns {} so the whole run
-    safely falls back to a full fetch instead of failing.
-    """
-    try:
-        result = session.execute(
-            select(Campaign.AdAccountID, func.max(Campaign.UpdatedTime))
-            .group_by(Campaign.AdAccountID)
-        ).all()
-    except Exception:
-        logger.exception("Could not read Campaign watermarks; falling back to full fetch")
-        session.rollback()
-        return {}
-
-    watermarks: dict[str, datetime] = {}
-    for account_id, max_updated in result:
-        key = bare_account_id(account_id)
-        if key is None or max_updated is None:
-            continue
-        watermarks[key] = max_updated
-    #logger.info(watermarks)
-    return watermarks
-
-
-def _build_params(watermark: datetime | None) -> dict:
-    params = dict(PARAMS)  # copy: never mutate the module-level dict
-    if watermark is not None:
-        # Stored values are naive UTC (see as_datetime), so tag as UTC before converting.
-        since_ts = int((watermark.replace(tzinfo=timezone.utc) - UPDATED_SINCE_BUFFER).timestamp())
-        params["filtering"] = json.dumps([
-            {"field": "updated_time", "operator": "GREATER_THAN", "value": since_ts}
-        ])
-    return params
+# Incremental cut-off = last successful run's start (Watermark.metaadsetl) minus this delta,
+# so clock skew or late-propagating updates can't drop rows. Safe because upsert is idempotent.
+WATERMARK_DELTA = timedelta(days=1)
 
 
 def _extract(
     client: MetaClient,
     token: str,
     account_ids: list[str],
-    watermarks: dict[str, datetime],
-) -> list[dict]:
+    since: datetime | None,
+) -> tuple[list[dict], list[str]]:
+    """Returns (rows, failed_account_ids)."""
     rows: list[dict] = []
-    full_count = 0
-    incremental_count = 0
+    failed: list[str] = []
+    params = with_updated_filter(PARAMS, since)  # updated_time > since; unfiltered if since is None
     for index, account_id in enumerate(account_ids, start=1):
         bare_id = bare_account_id(account_id)
-        watermark = watermarks.get(bare_id)
-        params = _build_params(watermark)
-        if watermark is None:
-            full_count += 1
-        else:
-            incremental_count += 1
         account_rows = 0
         try:
             for page in client.paginate(f"/act_{bare_id}/campaigns", token, params):
@@ -98,24 +55,18 @@ def _extract(
                     campaign["_account_id"] = bare_id
                     rows.append(campaign)
                     account_rows += 1
-            logger.info(
-                "Campaign fetch done for AccountID=%s (%s): %d row(s)",
-                account_id,
-                "full" if watermark is None else f"since {watermark.isoformat()}",
-                account_rows,
-            )
+            logger.info("Campaign fetch done for AccountID=%s: %d row(s)", account_id, account_rows)
         except Exception:
-            # Nothing is stored for this account, so its watermark doesn't advance
-            # and the next run retries the same window.
             logger.exception("Campaign fetch failed for AccountID=%s", account_id)
+            failed.append(bare_id)
             continue
         if index == len(account_ids) or index % 100 == 0:
             logger.info("Processed %d/%d ad accounts for Campaign", index, len(account_ids))
     logger.info(
-        "Campaign extract summary: %d account(s) full, %d incremental, %d row(s) fetched",
-        full_count, incremental_count, len(rows),
+        "Campaign extract summary: %s, %d row(s) fetched, %d account(s) failed",
+        "full" if since is None else f"updated_time > {since.isoformat()}", len(rows), len(failed),
     )
-    return rows
+    return rows, failed
 
 
 def _transform(raw_rows: list[dict]) -> pd.DataFrame:
@@ -159,25 +110,27 @@ def dimension_campaign(
     metaclient: MetaClient | None = None,
     token: str | None = None,
     last_run: datetime | None = None,  # unused: kept so run_staging's call signature stays compatible
-    full_refresh: bool = False,        # True bypasses watermarks (e.g. weekly job to catch hard deletes/missed rows)
+    full_refresh: bool = False,        # True ignores the watermark (e.g. periodic job to catch hard deletes/missed rows)
 ) -> int:
     session, owns_session = open_session(db_connection)
     client = metaclient or get_client()
     try:
-        account_ids = read_ids(session, AdAccount, "AccountID")
-        access_token = token or resolve_token(session)
+        with track_run(session, Campaign.__tablename__, delta=WATERMARK_DELTA, full_refresh=full_refresh) as run:
+            account_ids = read_ids(session, AdAccount, "AccountID")
+            access_token = token or resolve_token(session)
+            logger.info(
+                "Extracting Campaign for %d account(s) (%s)",
+                len(account_ids), "FULL REFRESH" if run.since is None else f"incremental since {run.since}",
+            )
 
-        watermarks = {} if full_refresh else _get_account_watermarks(session)
-        logger.info(
-            "Extracting Campaign for %d account(s) (%s); %d with watermark",
-            len(account_ids), "FULL REFRESH" if full_refresh else "incremental", len(watermarks),
-        )
-
-        raw = _extract(client, access_token, account_ids, watermarks)
-        if not raw:
-            logger.info("No new or updated Campaign rows; nothing to upsert")
-            return 0
-        return upsert(_transform(raw), Campaign, KEY_COLUMNS, session=session)
+            raw, failed = _extract(client, access_token, account_ids, run.since)
+            loaded = 0
+            if raw:
+                loaded = upsert(_transform(raw), Campaign, KEY_COLUMNS, session=session)
+            else:
+                logger.info("No new or updated Campaign rows; nothing to upsert")
+            raise_if_failed("Campaign", failed)
+            return loaded
     finally:
         if owns_session:
             session.close()
@@ -187,5 +140,3 @@ def dimension_campaign(
 
 if __name__ == "__main__":
     dimension_campaign()
-
-

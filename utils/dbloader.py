@@ -5,7 +5,7 @@ from sqlalchemy import Connection, Engine, create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from config import Settings, get_conf
-from models import Base
+from models import WATERMARK_SCHEMA, Base
 from utils.logging import logger
 
 
@@ -33,11 +33,21 @@ def get_engine(settings: Settings | None = None) -> Engine:
         
     engine = create_engine(settings.sqlalchemy_url(), **engine_kwargs)
     if settings.database_backend.lower() == "sqlite":
-        return engine.execution_options(schema_translate_map={settings.sql_schema: None})
+        # SQLite has no schemas: strip both the staging and the watermark schema.
+        return engine.execution_options(
+            schema_translate_map={settings.sql_schema: None, WATERMARK_SCHEMA: None}
+        )
         
     return engine
 
 def create_schema(engine: Engine) -> None:
+    if engine.dialect.name == "mssql":
+        # create_all() creates tables but not schemas; make sure the watermark schema exists.
+        with engine.begin() as conn:
+            conn.execute(text(
+                f"IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = N'{WATERMARK_SCHEMA}') "
+                f"EXEC('CREATE SCHEMA [{WATERMARK_SCHEMA}]')"
+            ))
     Base.metadata.create_all(engine)
 
 
