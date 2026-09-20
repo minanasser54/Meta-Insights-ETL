@@ -144,7 +144,7 @@ class Campaign(Base):
     __table_args__ = {"schema": STAGING_SCHEMA}
     CampaignID: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
     #AdAccountID: Mapped[str] = mapped_column(NVARCHAR(500), nullable=False)
-    AdAccountID: Mapped[str] = mapped_column(BigInteger, nullable=False)
+    AdAccountID: Mapped[int] = mapped_column(BigInteger, nullable=False)
     CampaignName: Mapped[str | None] = mapped_column(NVARCHAR(500))
     Objective: Mapped[str | None] = mapped_column(NVARCHAR(100))
     BuyingType: Mapped[str | None] = mapped_column(NVARCHAR(100))
