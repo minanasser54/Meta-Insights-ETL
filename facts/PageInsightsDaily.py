@@ -93,9 +93,6 @@ def fact_page_insights_daily(
             if failed:
                 logger.warning("PageInsightsDaily: %d page(s) failed and are queued for retry: %s", len(failed), ", ".join(failed))
             rows = _transform(raw)
-            # Only clear the window for pages that fetched OK, and do it in the same transaction as the
-            # insert. The original deleted (and committed) the window for ALL pages before fetching, so a
-            # failed page lost the rows it already had.
             ok_ids = [int(p) for p in page_ids if str(p) not in set(failed)]
             if ok_ids:
                 session.execute(

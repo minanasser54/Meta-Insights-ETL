@@ -18,6 +18,7 @@ from facts.PostInsightsSnapshot import fact_post_insights_snapshot
 from utils.dbloader import create_schema, get_engine
 from utils.logging import logger
 from utils.metaclient import MetaClient
+from utils.backfill import *
 
 from config import get_conf
 from retry_failed import run_retries
@@ -44,7 +45,7 @@ def run_staging(
     )
     for name, dimension in dimensions:
         try:
-            if name=="Campaign"  or name=="Ad and Creative":
+            if name=="Campaign"  or name=="Ad and Creative" or name=="Post":
                 loaded = dimension(db_connection=engine, metaclient=metaclient, token=token, last_run=last_run,full_refresh=configs.full_refresh)
                 logger.info("Dimension %s completed: %d rows", name, loaded)
             elif name=="AdSet":
@@ -75,52 +76,6 @@ def run_staging(
     logger.info("Staging ETL completed")
 
 
-def _chunk_date_range(since: str, until: str, chunk_days: int = 10) -> list[tuple[str, str]]:
-    start = date.fromisoformat(since)
-    end = date.fromisoformat(until)
-    chunks: list[tuple[str, str]] = []
-    cursor = start
-    while cursor <= end:
-        chunk_last = min(cursor + timedelta(days=chunk_days - 1), end)   # inclusive last day
-        chunks.append((cursor.isoformat(), (chunk_last + timedelta(days=1)).isoformat()))
-        cursor = chunk_last + timedelta(days=1)
-    return chunks
-
-
-def run_month_backfill(since: str = "2026-08-01", until: str = "2026-09-01", chunk_days: int = 10) -> None:
-    engine = get_engine()
-    create_schema(engine)
-
-    chunks = _chunk_date_range(since, until, chunk_days=chunk_days)
-    logger.info("Backfill split into %d chunk(s) of up to %d day(s): %s", len(chunks), chunk_days, chunks)
-
-    tasks: dict[str, Any] = {}
-    for chunk_since, chunk_until in chunks:
-        tasks[f"AdInsightsDaily[{chunk_since}:{chunk_until}]"] = lambda s=chunk_since, u=chunk_until: fact_ad_insights_daily(
-            db_connection=engine, since=s, until=u
-        )
-        tasks[f"PageInsightsDaily[{chunk_since}:{chunk_until}]"] = lambda s=chunk_since, u=chunk_until: fact_page_insights_daily(
-            db_connection=engine, since=s, until=u
-        )
-
-    max_workers = min(len(tasks), 10)
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(fn): name for name, fn in tasks.items()}
-        for future in as_completed(futures):
-            name = futures[future]
-            try:
-                loaded = future.result()
-                logger.info("%s backfill completed: %d rows", name, loaded)
-            except Exception:
-                logger.exception("%s backfill failed", name)
-
-
-def run_post_insights_backfill(max_workers: int = 10) -> None:
-    engine = get_engine()
-    create_schema(engine)
-    loaded = fact_post_insights_snapshot(db_connection=engine, post_mode="all", max_workers=max_workers)
-    logger.info("PostInsightsSnapshot backfill completed: %d rows", loaded)
-
 
 
 
@@ -130,9 +85,10 @@ if __name__ == "__main__":
     # Historical backfill example. Run manually
     #run_staging()
 
-    #run_month_backfill(since="2026-09-01", until="2026-09-20", chunk_days=10)
+    #run_month_backfill(since="2026-09-18", until="2026-09-20", chunk_days=10)
     #run_post_insights_backfill(50)
 
-    run_staging()
-    run_retries()   # re-fetch anything that failed above (or in earlier runs), then give up after N attempts
+    #run_staging()
+
+    run_retries()
 

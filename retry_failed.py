@@ -1,18 +1,8 @@
 """
-Drain the failed-fetch queue.
-
-    python retry_failed.py            # retry everything pending
-    python retry_failed.py --list     # just show what is queued
-
-Every entry is re-fetched for exactly the entity and time range that originally failed:
-  * facts       -> since/until stored on the entry (until is exclusive)
-  * dimensions  -> the incremental cut-off stored in `since` (null = it was a full fetch)
-
 Outcomes per entry
   success -> removed from the queue
   failure -> stays queued, attempts += 1
-  attempts >= retry_max_attempts -> moved to <queue>.dead.txt for manual review (nothing is
-                                    written to the fact table: a gap stays a gap, never a fake 0)
+  attempts >= retry_max_attempts -> moved to <queue>.dead.txt for manual review
 """
 from __future__ import annotations
 
@@ -36,7 +26,6 @@ from utils.logging import logger
 from utils.metaclient import MetaClient, get_client
 from utils.retry_queue import FailedFetch, get_retry_queue
 
-# table name (as stored in the queue) -> (callable, kind, id-keyword)
 FACT_HANDLERS = {
     "AdInsightsDaily": (fact_ad_insights_daily, "account_ids"),
     "PageInsightsDaily": (fact_page_insights_daily, "page_ids"),
@@ -47,8 +36,7 @@ DIM_HANDLERS = {
     "Ad": dimension_ad_and_creative,
     "Post": dimension_post,
 }
-# Dimensions whose parents are Businesses rather than accounts/pages are re-run in full: they are
-# tiny, and their upsert is idempotent.
+
 FULL_RERUN_DIMS = {"Page": dimension_page}
 
 

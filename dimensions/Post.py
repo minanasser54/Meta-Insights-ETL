@@ -111,7 +111,7 @@ def dimension_post(
     session, owns_session = open_session(db_connection)
     client = metaclient or get_client()
     try:
-        if full_refresh is None:
+        if full_refresh is False:
             full_refresh = date.today().weekday() == FULL_REFRESH_WEEKDAY
             if full_refresh:
                 logger.info("Today is the weekly Post full-refresh day; ignoring the watermark")
