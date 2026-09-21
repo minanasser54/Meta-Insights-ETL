@@ -105,6 +105,8 @@ def dimension_post(
     token: str | None = None,
     last_run: datetime | None = None,  # unused: kept so run_staging's call signature stays compatible
     full_refresh: bool | None = None,  # None = auto (full on FULL_REFRESH_WEEKDAY); True/False forces the mode
+    parent_ids: list[str] | None = None,  # retry: only these pages
+    since_override: datetime | None = None,  # retry: original cut-off
 ) -> int:
     session, owns_session = open_session(db_connection)
     client = metaclient or get_client()
@@ -114,21 +116,22 @@ def dimension_post(
             if full_refresh:
                 logger.info("Today is the weekly Post full-refresh day; ignoring the watermark")
 
-        with track_run(session, Post.__tablename__, delta=WATERMARK_DELTA, full_refresh=full_refresh) as run:
-            page_ids = read_ids(session, Page, "PageID")
+        with track_run(session, Post.__tablename__, delta=WATERMARK_DELTA, full_refresh=full_refresh, partial=parent_ids is not None) as run:
+            page_ids = parent_ids if parent_ids is not None else read_ids(session, Page, "PageID")
             access_token = token or resolve_token(session)
             logger.info(
                 "Extracting Post for %d page(s) (%s)",
                 len(page_ids), "FULL REFRESH" if run.since is None else f"incremental since {run.since}",
             )
 
-            raw, failed = _extract(client, access_token, page_ids, run.since)
+            fetch_since = since_override if parent_ids is not None else run.since
+            raw, failed = _extract(client, access_token, page_ids, fetch_since)
             loaded = 0
             if raw:
                 loaded = upsert(_transform(raw), Post, KEY_COLUMNS, session=session)
             else:
                 logger.info("No new or updated Post rows; nothing to upsert")
-            raise_if_failed("Post", failed)
+            raise_if_failed("Post", failed, since=run.since)
             return loaded
     finally:
         if owns_session:

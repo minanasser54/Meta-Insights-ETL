@@ -20,6 +20,7 @@ from utils.logging import logger
 from utils.metaclient import MetaClient
 
 from config import get_conf
+from retry_failed import run_retries
 
 configs=get_conf()
 
@@ -60,12 +61,8 @@ def run_staging(
         ("AdInsightsDaily", fact_ad_insights_daily),
         ("PageInsightsDaily", fact_page_insights_daily),
 
-        # PostInsightsSnapshot runs daily only (no since/until): its metrics are
-        # lifetime-only, so each run captures today's current totals as a
-        # dated snapshot. It intentionally has no place in historical backfill
-        # — see run_month_backfill below.
-        
-        #("PostInsightsSnapshot", fact_post_insights_snapshot),
+        # PostInsightsSnapshot runs daily only (no since/until): its metrics are lifetime-only, so each run captures today's current totals as a
+        ("PostInsightsSnapshot", fact_post_insights_snapshot),
     )
     for name, fact in facts:
         try:
@@ -79,15 +76,14 @@ def run_staging(
 
 
 def _chunk_date_range(since: str, until: str, chunk_days: int = 10) -> list[tuple[str, str]]:
-    """Split [since, until] into consecutive chunks of at most `chunk_days` days each."""
     start = date.fromisoformat(since)
     end = date.fromisoformat(until)
     chunks: list[tuple[str, str]] = []
     cursor = start
     while cursor <= end:
-        chunk_end = min(cursor + timedelta(days=chunk_days - 1), end)
-        chunks.append((cursor.isoformat(), chunk_end.isoformat()))
-        cursor = chunk_end + timedelta(days=1)
+        chunk_last = min(cursor + timedelta(days=chunk_days - 1), end)   # inclusive last day
+        chunks.append((cursor.isoformat(), (chunk_last + timedelta(days=1)).isoformat()))
+        cursor = chunk_last + timedelta(days=1)
     return chunks
 
 
@@ -134,8 +130,9 @@ if __name__ == "__main__":
     # Historical backfill example. Run manually
     #run_staging()
 
-    #run_month_backfill(since="2026-09-01", until="2026-09-19", chunk_days=10)
+    #run_month_backfill(since="2026-09-01", until="2026-09-20", chunk_days=10)
     #run_post_insights_backfill(50)
 
     run_staging()
+    run_retries()   # re-fetch anything that failed above (or in earlier runs), then give up after N attempts
 

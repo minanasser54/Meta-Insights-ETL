@@ -1,14 +1,3 @@
-"""
-Every dimension/fact run is wrapped in `track_run`:
-    with track_run(session, "Campaign", delta=WATERMARK_DELTA) as run:
-        ... fetch rows with `run.since` ...
-
-* On entry (TableName, StartTime=now, EndTime=NULL, Status='Running')
-* On normal exit the row is updated to Status='Success' with EndTime.
-* On any exception the row is updated to Status='Failed' with EndTime and the exception is re-raised.
-`run.since` is the incremental cut-off for that table:
-    MAX(StartTime) over that table's 'Success' rows  -  delta
-"""
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -23,6 +12,7 @@ from utils.logging import logger
 STATUS_RUNNING = "Running"
 STATUS_SUCCESS = "Success"
 STATUS_FAILED = "Failed"
+RETRY_SUFFIX = ":retry"
 
 
 def utc_now() -> datetime:
@@ -72,7 +62,12 @@ def track_run(
     table_name: str,
     delta: timedelta | None = None,
     full_refresh: bool = False,
+    partial: bool = False,
 ) -> Iterator[WatermarkRun]:
+
+    if partial:
+        table_name = f"{table_name}{RETRY_SUFFIX}"
+        full_refresh = True   # the caller supplies its own cut-off; do not consult the watermark
     last_start = None if full_refresh else get_last_success_start(session, table_name)
     since = None
     if last_start is not None:
@@ -104,9 +99,21 @@ def track_run(
         _finish(session, run_id, STATUS_SUCCESS)
 
 
-def raise_if_failed(name: str, failed_parents: list[str]) -> None:
-    if failed_parents:
-        raise RuntimeError(
-            f"{name}: fetch failed for {len(failed_parents)} parent(s) ({', '.join(failed_parents)}); "
-            "run marked Failed so the watermark does not advance"
-        )
+def raise_if_failed(
+    name: str,
+    failed_parents: list[str],
+    since: datetime | None = None,
+    error: str = "fetch failed",
+) -> None:
+    if not failed_parents:
+        return
+    from utils.retry_queue import get_retry_queue  # local import: avoids a cycle at module load
+
+    queue = get_retry_queue()
+    since_text = since.isoformat(timespec="seconds") if since else None
+    for parent in failed_parents:
+        queue.record(name, parent, since_text, None, error)
+    raise RuntimeError(
+        f"{name}: fetch failed for {len(failed_parents)} parent(s) ({', '.join(failed_parents)}); "
+        "queued for retry; run marked Failed so the watermark does not advance"
+    )

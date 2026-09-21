@@ -214,8 +214,9 @@ class Post(Base):
 class PostInsightsSnapshot(Base):
     __tablename__ = "PostInsightsSnapshot"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    PostID: Mapped[str] = mapped_column(NVARCHAR(100), primary_key=True, autoincrement=False)
-    DateKey: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    PostInsightKey: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    PostID: Mapped[str] = mapped_column(NVARCHAR(100))
+    DateKey: Mapped[int] = mapped_column(Integer)
     Date: Mapped[datetime] = mapped_column(Date, nullable=False)
     Shares: Mapped[int | None] = mapped_column(BigInteger)
     Reactions: Mapped[int | None] = mapped_column(BigInteger)

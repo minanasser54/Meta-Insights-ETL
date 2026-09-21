@@ -11,6 +11,7 @@ from utils.dbloader import open_session, resolve_token, upsert
 from utils.dimension_helpers import bare_account_id
 from utils.logging import logger
 from utils.metaclient import MetaClient, get_client
+from utils.retry_queue import get_retry_queue
 from utils.watermark import track_run
 
 
@@ -21,6 +22,7 @@ FIELDS = (
     "inline_post_engagement,cost_per_inline_post_engagement,actions,cost_per_action_type"
 )
 PARAMS = {"level": "ad", "time_increment": 1, "fields": FIELDS, "limit": 100}
+TABLE = AdInsightsDaily.__tablename__
 KEY_COLUMNS = ["AdID", "DateKey"]
 
 # LEAD_ACTION_TYPES = {"lead", "onsite_conversion.lead", "leadgen_grouped"}
@@ -53,20 +55,29 @@ def _action_value(actions, action_types: set[str]):
     return total if found else None
 
 
-def _extract(client: MetaClient, token: str, account_ids: list[str], since: str, until: str) -> list[dict]:
+def _extract(
+    client: MetaClient, token: str, account_ids: list[str], since: str, until: str,
+    record_failures: bool = True,
+) -> tuple[list[dict], list[str]]:
+    """Returns (rows, failed_account_ids). Failures are written to the retry queue with their window."""
     rows: list[dict] = []
+    failed: list[str] = []
+    queue = get_retry_queue()
     params = {**PARAMS, "time_range": json.dumps({"since": since, "until": until})}
     for index, account_id in enumerate(account_ids, start=1):
         try:
             for page in client.paginate(f"/act_{bare_account_id(account_id)}/insights", token, params):
                 rows.extend(page)
             logger.info("AdInsightsDaily fetch done for AccountID=%s", account_id)
-        except Exception:
+        except Exception as exc:
             logger.exception("AdInsightsDaily fetch failed for AccountID=%s", account_id)
+            failed.append(str(account_id))
+            if record_failures:
+                queue.record(TABLE, account_id, since, until, exc)
             continue
         if index == len(account_ids) or index % 10 == 0:
             logger.info("Processed %d/%d ad accounts for AdInsightsDaily", index, len(account_ids))
-    return rows
+    return rows, failed
 
 
 def _transform(raw_rows: list[dict]) -> pd.DataFrame:
@@ -97,17 +108,25 @@ def fact_ad_insights_daily(
     token: str | None = None,
     since: str | None = None,
     until: str | None = None,
+    account_ids: list[str] | None = None,      # retry: restrict to these accounts
+    record_failures: bool = True,              # retry runner passes False and does its own bookkeeping
+    failed_out: list[str] | None = None,       # caller-supplied list that receives failed account ids
 ) -> int:
     since, until = daily_window(since, until)
     session, owns_session = open_session(db_connection)
     client = metaclient or get_client()
     try:
-        with track_run(session, AdInsightsDaily.__tablename__):
-            account_ids = [str(value) for value in session.execute(AdAccount.__table__.select().with_only_columns(AdAccount.AccountID)).scalars()]
+        with track_run(session, TABLE, partial=account_ids is not None):
+            if account_ids is None:
+                account_ids = [str(value) for value in session.execute(AdAccount.__table__.select().with_only_columns(AdAccount.AccountID)).scalars()]
             access_token = token or resolve_token(session)
             log_fact_window("AdInsightsDaily", since, until, len(account_ids))
-            rows = _transform(_extract(client, access_token, account_ids, since, until))
-            return upsert(rows, AdInsightsDaily, KEY_COLUMNS, session=session)
+            raw, failed = _extract(client, access_token, account_ids, since, until, record_failures)
+            if failed_out is not None:
+                failed_out.extend(failed)
+            if failed:
+                logger.warning("AdInsightsDaily: %d account(s) failed and are queued for retry: %s", len(failed), ", ".join(failed))
+            return upsert(_transform(raw), AdInsightsDaily, KEY_COLUMNS, session=session)
     finally:
         if owns_session:
             session.close()

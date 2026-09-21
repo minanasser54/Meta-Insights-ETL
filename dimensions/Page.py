@@ -8,7 +8,7 @@ from models import Business, Page
 from utils.dbloader import open_session, read_ids, resolve_token, upsert
 from utils.logging import logger
 from utils.metaclient import MetaClient, get_client
-from utils.watermark import track_run
+from utils.watermark import raise_if_failed, track_run
 
 
 FIELDS = "id,name,verification_status,is_verified,is_published,business{id}"
@@ -17,8 +17,10 @@ KEY_COLUMNS = ["PageID"]
 OUTPUT_COLUMNS = ["PageID", "PageName", "BusinessID", "VerificationStatus", "IsVerified", "IsPublished"]
 
 
-def _extract(client: MetaClient, token: str, business_ids: list[str]) -> list[dict]:
+def _extract(client: MetaClient, token: str, business_ids: list[str]) -> tuple[list[dict], list[str]]:
+    """Returns (rows, failed_business_ids)."""
     rows: list[dict] = []
+    failed: list[str] = []
     for index, business_id in enumerate(business_ids, start=1):
         try:
             for page in client.paginate(f"/{business_id}/owned_pages", token, PARAMS):
@@ -28,10 +30,11 @@ def _extract(client: MetaClient, token: str, business_ids: list[str]) -> list[di
             logger.info("Page fetch done for BusinessID=%s", business_id)    
         except Exception:
             logger.exception("Page fetch failed for BusinessID=%s", business_id)
+            failed.append(str(business_id))
             continue
         if index == len(business_ids) or index % 100 == 0:
             logger.info("Processed %d/%d businesses for Page", index, len(business_ids))
-    return rows
+    return rows, failed
 
 
 def _transform(raw_rows: list[dict]) -> pd.DataFrame:
@@ -62,7 +65,10 @@ def dimension_page(
             business_ids = read_ids(session, Business, "BusinessID")
             access_token = token or resolve_token(session)
             logger.info("Extracting Page for %d business(es); last_run=%s", len(business_ids), last_run)
-            return upsert(_transform(_extract(client, access_token, business_ids)), Page, KEY_COLUMNS, session=session)
+            raw, failed = _extract(client, access_token, business_ids)
+            loaded = upsert(_transform(raw), Page, KEY_COLUMNS, session=session)
+            raise_if_failed("Page", failed)   # load what we got, then record failures + mark run Failed
+            return loaded
     finally:
         if owns_session:
             session.close()

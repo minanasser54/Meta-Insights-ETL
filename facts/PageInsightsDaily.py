@@ -10,23 +10,34 @@ from models import Page, PageInsightsDaily
 from utils.dbloader import open_session, resolve_token, upsert
 from utils.logging import logger
 from utils.metaclient import MetaClient, get_client
+from utils.retry_queue import get_retry_queue
 from utils.watermark import track_run
 
 
+TABLE = PageInsightsDaily.__tablename__
 PAGE_INSIGHT_METRICS = ["page_views_total", "page_post_engagements", "page_video_views"]
 PARAMS = {"period": "day", "metric": ",".join(PAGE_INSIGHT_METRICS), "limit": 100}
 KEY_COLUMNS = ["PageID", "DateKey", "MetricName"]
 OUTPUT_COLUMNS = ["PageID", "Date", "DateKey", "MetricName", "Value"]
 
 
-def _extract(client: MetaClient, user_token: str, page_ids: list[str], since: str, until: str) -> list[dict]:
+def _extract(
+    client: MetaClient, user_token: str, page_ids: list[str], since: str, until: str,
+    record_failures: bool = True,
+) -> tuple[list[dict], list[str]]:
+    """Returns (rows, failed_page_ids). A page with no token is treated as failed so it gets retried."""
     tokens = page_tokens(client, user_token)
     rows: list[dict] = []
+    failed: list[str] = []
+    queue = get_retry_queue()
     params = {**PARAMS, "since": since, "until": until}
     for index, page_id in enumerate(page_ids, start=1):
         page_token = tokens.get(page_id) or get_conf().page_access_token
         if not page_token:
             logger.warning("Skipping PageInsightsDaily because no Page access token exists for PageID=%s", page_id)
+            failed.append(str(page_id))
+            if record_failures:
+                queue.record(TABLE, page_id, since, until, "no page access token")
             continue
         try:
             for page in client.paginate(f"/{page_id}/insights", page_token, params):
@@ -37,12 +48,15 @@ def _extract(client: MetaClient, user_token: str, page_ids: list[str], since: st
                         if day and since <= day.isoformat() < until:
                             rows.append({"PageID": page_id, "Date": day, "MetricName": metric.get("name"), "Value": value.get("value")})
             logger.info("PageInsightsDaily fetch done for PageID=%s", page_id)
-        except Exception:
+        except Exception as exc:
             logger.exception("PageInsightsDaily fetch failed for PageID=%s", page_id)
+            failed.append(str(page_id))
+            if record_failures:
+                queue.record(TABLE, page_id, since, until, exc)
             continue
         if index == len(page_ids) or index % 25 == 0:
             logger.info("Processed %d/%d pages for PageInsightsDaily", index, len(page_ids))
-    return rows
+    return rows, failed
 
 
 def _transform(raw_rows: list[dict]) -> pd.DataFrame:
@@ -60,24 +74,40 @@ def fact_page_insights_daily(
     token: str | None = None,
     since: str | None = None,
     until: str | None = None,
+    page_ids: list[str] | None = None,         # retry: restrict to these pages
+    record_failures: bool = True,
+    failed_out: list[str] | None = None,
 ) -> int:
     since, until = daily_window(since, until)
     session, owns_session = open_session(db_connection)
     client = metaclient or get_client()
     try:
-        with track_run(session, PageInsightsDaily.__tablename__):
-            page_ids = [str(value) for value in session.execute(Page.__table__.select().with_only_columns(Page.PageID)).scalars()]
+        with track_run(session, TABLE, partial=page_ids is not None):
+            if page_ids is None:
+                page_ids = [str(value) for value in session.execute(Page.__table__.select().with_only_columns(Page.PageID)).scalars()]
             access_token = token or resolve_token(session)
             log_fact_window("PageInsightsDaily", since, until, len(page_ids))
-            rows = _transform(_extract(client, access_token, page_ids, since, until))
-            session.execute(
-                delete(PageInsightsDaily).where(
-                    PageInsightsDaily.Date >= date.fromisoformat(since),
-                    PageInsightsDaily.Date < date.fromisoformat(until),
+            raw, failed = _extract(client, access_token, page_ids, since, until, record_failures)
+            if failed_out is not None:
+                failed_out.extend(failed)
+            if failed:
+                logger.warning("PageInsightsDaily: %d page(s) failed and are queued for retry: %s", len(failed), ", ".join(failed))
+            rows = _transform(raw)
+            # Only clear the window for pages that fetched OK, and do it in the same transaction as the
+            # insert. The original deleted (and committed) the window for ALL pages before fetching, so a
+            # failed page lost the rows it already had.
+            ok_ids = [int(p) for p in page_ids if str(p) not in set(failed)]
+            if ok_ids:
+                session.execute(
+                    delete(PageInsightsDaily).where(
+                        PageInsightsDaily.PageID.in_(ok_ids),
+                        PageInsightsDaily.Date >= date.fromisoformat(since),
+                        PageInsightsDaily.Date < date.fromisoformat(until),
+                    )
                 )
-            )
+            loaded = upsert(rows, PageInsightsDaily, KEY_COLUMNS, session=session, commit=False)
             session.commit()
-            return upsert(rows, PageInsightsDaily, KEY_COLUMNS, session=session)
+            return loaded
     finally:
         if owns_session:
             session.close()

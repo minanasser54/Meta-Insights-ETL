@@ -39,6 +39,10 @@ class Settings(BaseSettings):
 
     full_refresh: bool = False
 
+    # Failed-fetch retry queue (text file, JSON Lines).
+    retry_queue_path: str = "logs/retry_queue.txt"
+    retry_max_attempts: int = 5
+
     @property
     def base_url(self) -> str:
         return f"https://graph.facebook.com/{self.api_version}"

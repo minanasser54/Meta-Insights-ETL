@@ -111,25 +111,28 @@ def dimension_campaign(
     token: str | None = None,
     last_run: datetime | None = None,  # unused: kept so run_staging's call signature stays compatible
     full_refresh: bool = False,        # True ignores the watermark (e.g. periodic job to catch hard deletes/missed rows)
+    parent_ids: list[str] | None = None,  # retry: only these parents
+    since_override: datetime | None = None,  # retry: original cut-off (None + parent_ids = full fetch)
 ) -> int:
     session, owns_session = open_session(db_connection)
     client = metaclient or get_client()
     try:
-        with track_run(session, Campaign.__tablename__, delta=WATERMARK_DELTA, full_refresh=full_refresh) as run:
-            account_ids = read_ids(session, AdAccount, "AccountID")
+        with track_run(session, Campaign.__tablename__, delta=WATERMARK_DELTA, full_refresh=full_refresh, partial=parent_ids is not None) as run:
+            account_ids = parent_ids if parent_ids is not None else read_ids(session, AdAccount, "AccountID")
             access_token = token or resolve_token(session)
             logger.info(
                 "Extracting Campaign for %d account(s) (%s)",
                 len(account_ids), "FULL REFRESH" if run.since is None else f"incremental since {run.since}",
             )
 
-            raw, failed = _extract(client, access_token, account_ids, run.since)
+            fetch_since = since_override if parent_ids is not None else run.since
+            raw, failed = _extract(client, access_token, account_ids, fetch_since)
             loaded = 0
             if raw:
                 loaded = upsert(_transform(raw), Campaign, KEY_COLUMNS, session=session)
             else:
                 logger.info("No new or updated Campaign rows; nothing to upsert")
-            raise_if_failed("Campaign", failed)
+            raise_if_failed("Campaign", failed, since=run.since)
             return loaded
     finally:
         if owns_session:
