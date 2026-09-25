@@ -214,7 +214,7 @@ class Post(Base):
 class PostInsightsSnapshot(Base):
     __tablename__ = "PostInsightsSnapshot"
     __table_args__ = {"schema": STAGING_SCHEMA}
-    PostInsightKey: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    PostInsightKey: Mapped[int] = mapped_column(BigInteger,primary_key=True, autoincrement=True)
     PostID: Mapped[str] = mapped_column(NVARCHAR(100))
     DateKey: Mapped[int] = mapped_column(Integer)
     Date: Mapped[datetime] = mapped_column(Date, nullable=False)
